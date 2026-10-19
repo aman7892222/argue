@@ -263,68 +263,180 @@ details.round > .note:last-child { margin-bottom: 16px; }
   .head h1 { font-size: 26px; }
 }
 @media (max-width: 680px) { .lanes { grid-template-columns: 1fr !important; } }
+
+/* ---------- app layout: chat-style sidebar + centred main ---------- */
+.app { grid-template-columns: 284px 1fr; }
+aside.sidebar { padding: 18px 14px 14px; gap: 0; background: rgba(250, 246, 239, .82); }
+.sidebar .brand { padding: 2px 8px 14px; margin: 0; }
+.new-btn { display: flex; align-items: center; gap: 9px; width: 100%; padding: 10px 12px; border: 1px solid var(--line); border-radius: 12px;
+  background: var(--panel); color: var(--ink); font-weight: 650; font-size: 14px; box-shadow: var(--shadow); transition: border-color .15s, transform .1s; }
+.new-btn span { font-size: 16px; line-height: 1; color: var(--muted); }
+.new-btn:hover { border-color: #d5cab6; }
+.new-btn:active { transform: translateY(1px); }
+.new-btn.active { border-color: var(--ink); }
+.history { flex: 1; overflow-y: auto; margin: 14px -4px 10px; padding: 0 4px; min-height: 120px; }
+.history .group { font-size: 10.5px; text-transform: uppercase; letter-spacing: .12em; color: var(--muted); font-weight: 700; margin: 14px 8px 6px; }
+.history .group:first-child { margin-top: 2px; }
+.run-item { width: 100%; padding: 8px 10px; border-radius: 10px; gap: 2px; }
+.run-item .t { font-weight: 550; font-size: 13.5px; color: var(--ink2); }
+.run-item.active .t { color: var(--ink); font-weight: 650; }
+.run-item .m { font-size: 11px; }
+.run-item .pill { padding: 0 7px; font-size: 10.5px; }
+.side-bottom { border-top: 1px solid var(--line); padding-top: 12px; display: grid; gap: 6px; }
+.side-bottom .eyebrow { margin: 0 6px 2px; }
+.side-bottom .usage { margin: 0; }
+.side-bottom .pod svg.ring { width: 46px; height: 46px; }
+.side-bottom .pod .num { font-size: 12.5px; margin-top: 2px; }
+.side-bottom .pod .tip { top: auto; bottom: calc(100% - 4px); }
+details.library { border-radius: 12px; padding: 4px 6px; }
+details.library > summary { list-style: none; display: flex; align-items: baseline; gap: 8px; cursor: pointer; padding: 4px 0; color: var(--ink2); }
+details.library > summary::-webkit-details-marker { display: none; }
+details.library > summary .eyebrow { margin: 0; }
+details.library[open] { background: var(--panel); border: 1px solid var(--line); padding: 8px 10px 10px; display: grid; gap: 8px; }
+.lib-short { font-size: 11.5px; color: var(--muted); overflow: hidden; text-overflow: ellipsis; white-space: nowrap; min-width: 0; flex: 1; text-align: right; }
+.side-foot { margin-top: 2px; padding: 4px 6px 0; }
+
+main { max-width: none; padding: 0 40px 90px; display: flex; flex-direction: column; align-items: center; }
+#banner-slot { width: 100%; max-width: 880px; padding-top: 18px; }
+.composer-view, .run-view { width: 100%; max-width: 880px; }
+.run-view { padding-top: 26px; }
+
+/* ---------- new debate: centred hero + composer ---------- */
+.composer-view { min-height: calc(100vh - 40px); display: flex; flex-direction: column; justify-content: center; padding: 48px 0 40px; }
+.hero { text-align: center; margin-bottom: 26px; }
+.hero-mark { width: 46px; height: 46px; margin-bottom: 14px; }
+.hero-title { font: 500 46px/1.08 var(--serif); letter-spacing: -.022em; margin: 0; color: var(--ink); text-wrap: balance; }
+.hero-title em { font-style: italic; color: #8a5a3c; }
+.hero-sub { margin: 14px auto 0; max-width: 520px; color: var(--muted); font-size: 15.5px; line-height: 1.55; text-wrap: balance; }
+.composer { background: var(--panel); border: 1px solid var(--line); border-radius: 22px; box-shadow: 0 2px 4px rgba(40, 30, 10, .04), 0 18px 48px rgba(40, 30, 10, .08);
+  padding: 16px 16px 12px; transition: border-color .2s, box-shadow .2s; }
+.composer:focus-within { border-color: #d3c6af; box-shadow: 0 2px 4px rgba(40, 30, 10, .05), 0 22px 56px rgba(40, 30, 10, .11); }
+.composer textarea { border: 0; background: transparent; padding: 6px 8px; min-height: 84px; max-height: 340px; font: 400 18px/1.55 var(--serif); color: var(--ink); resize: none; }
+.composer textarea::placeholder { color: #a39a8d; font-style: italic; }
+.composer textarea:focus { box-shadow: none; outline: none; }
+.composer .attach-list { padding: 4px 8px 6px; }
+.composer-bar { display: flex; align-items: center; gap: 8px; padding-top: 10px; border-top: 1px solid var(--soft); flex-wrap: wrap; }
+.tool-btn { display: inline-flex; align-items: center; gap: 6px; border: 1px solid var(--line); background: #fff; color: var(--ink2); border-radius: 999px;
+  padding: 6px 12px; font-size: 13px; font-weight: 600; }
+.tool-btn:hover { border-color: #d5cab6; }
+.tool-select { display: inline-flex; align-items: center; gap: 6px; border: 1px solid var(--line); background: #fff; border-radius: 999px; padding: 2px 4px 2px 12px;
+  font-size: 12.5px; color: var(--muted); font-weight: 600; }
+.tool-select select { border: 0; padding: 4px 4px; background: transparent; font-size: 13px; font-weight: 650; color: var(--ink); width: auto; }
+.tool-select select:focus { box-shadow: none; }
+.spacer { flex: 1; }
+.kbd-hint { font-size: 11.5px; color: var(--muted); font-family: var(--mono); }
+.btn.start { border-radius: 999px; padding: 9px 18px; }
+.composer-view > .err { margin: 10px 6px 0; }
+.seats-panel { margin-top: 22px; }
+.seats-head { display: flex; align-items: center; justify-content: space-between; margin: 0 4px 10px; }
+.seats-head .eyebrow { margin: 0; }
+.link-btn.small { padding: 5px 11px; font-size: 12.5px; }
+.composer-view .seats { grid-template-columns: repeat(auto-fill, minmax(240px, 1fr)); gap: 10px; }
+.composer-view .seat-opt { background: var(--panel); }
+.examples { display: flex; flex-wrap: wrap; justify-content: center; gap: 8px; margin-top: 26px; }
+.example { border: 1px solid var(--line); background: transparent; border-radius: 999px; padding: 7px 14px; font-size: 13px; color: var(--ink2); }
+.example:hover { background: var(--panel); border-color: #d5cab6; }
+
+/* ---------- an open debate: the question, then the answer ---------- */
+.question { display: flex; justify-content: flex-end; margin: 4px 0 18px; }
+.question .bubble { max-width: 78%; background: #ece5d8; color: var(--ink); border-radius: 20px 20px 6px 20px; padding: 12px 16px; font-size: 15px; line-height: 1.55; white-space: pre-wrap; }
+.question .bubble small { display: block; color: var(--muted); font-size: 11px; text-transform: uppercase; letter-spacing: .1em; font-weight: 700; margin-bottom: 4px; }
+.run-view .head { margin-bottom: 22px; }
+
+@media (max-width: 920px) {
+  .app { grid-template-columns: 1fr; }
+  aside.sidebar { position: static; height: auto; }
+  .history { max-height: 240px; }
+  main { padding: 0 16px 70px; }
+  .composer-view { min-height: 0; padding-top: 28px; }
+  .hero-title { font-size: 34px; }
+}
 </style>
 </head>
 <body>
 <div class="app">
-  <aside>
+  <aside class="sidebar">
     <div class="brand">
       <svg viewBox="0 0 32 32" aria-hidden="true"><circle cx="16" cy="16" r="12" fill="none" stroke="#D97757" stroke-width="4" stroke-dasharray="24 100"/><circle cx="16" cy="16" r="12" fill="none" stroke="#1f1f1f" stroke-width="4" stroke-dasharray="24 100" stroke-dashoffset="-25.1"/><circle cx="16" cy="16" r="12" fill="none" stroke="#9B72CB" stroke-width="4" stroke-dasharray="24 100" stroke-dashoffset="-50.2"/></svg>
       <b>argue</b><span>debate desk</span>
     </div>
-    <div class="eyebrow">Plan usage</div>
-    <div class="usage" id="usage"></div>
+    <button class="new-btn" id="new-debate" type="button"><span aria-hidden="true">＋</span> New debate</button>
 
-    <div class="eyebrow">New debate</div>
-    <div class="card form" id="new-form">
-      <label class="field">What should they debate?
-        <textarea id="task" placeholder="e.g. Should a two-person startup build its MVP as a monolith or microservices?"></textarea>
-      </label>
-      <div class="attach">
-        <input type="file" id="attach-input" multiple accept=".pdf,.png,.jpg,.jpeg,.webp,.gif,.txt,.md,.csv" hidden>
-        <button class="link-btn" id="attach-btn" type="button">📎 Attach PDFs or images</button>
-        <div class="attach-list" id="attach-list"></div>
-      </div>
-      <div class="field">Seats
-        <div class="seats" id="seats"></div>
-        <button class="link-btn" id="add-seat" type="button">⟳ Scan for CLIs</button>
-      </div>
-      <div class="row2">
-        <label class="field">Max rounds
-          <select id="rounds"><option>1</option><option>2</option><option selected>3</option><option>4</option><option>5</option></select>
-        </label>
-        <label class="field">Consensus needs
-          <select id="threshold">
-            <option value="1">Everyone</option>
-            <option value="0.67">Two-thirds</option>
-            <option value="0.51">Majority</option>
-          </select>
-        </label>
-      </div>
-      <button class="btn" id="start">Start debate</button>
-      <p class="err" id="form-error" hidden></p>
-    </div>
+    <div class="history" id="runs"><p class="hint">Loading…</p></div>
 
-    <div class="eyebrow">Debates</div>
-    <div class="runs" id="runs"><p class="hint">Loading…</p></div>
-
-    <div class="eyebrow">Saved debates</div>
-    <div class="library card">
-      <p class="hint">Each finished debate is saved here as <b>report.pdf</b> (final answer), <b>report.html</b> (with every round) and <b>debate.json</b> (to reopen or rerun it).</p>
-      <div class="lib-path" id="lib-path">…</div>
-      <div class="lib-actions">
-        <button class="btn ghost small" id="lib-change" type="button">Change folder…</button>
-        <button class="btn ghost small" id="lib-open" type="button">Open folder</button>
+    <div class="side-bottom">
+      <div class="eyebrow">Plan usage</div>
+      <div class="usage" id="usage"></div>
+      <details class="library" id="library">
+        <summary><span class="eyebrow">Saved debates</span><span class="lib-short" id="lib-short"></span></summary>
+        <p class="hint">Each finished debate is saved as <b>report.pdf</b> (final answer), <b>report.html</b> (every round) and <b>debate.json</b> (to reopen or rerun it).</p>
+        <div class="lib-path" id="lib-path">…</div>
+        <div class="lib-actions">
+          <button class="btn ghost small" id="lib-change" type="button">Change folder…</button>
+          <button class="btn ghost small" id="lib-open" type="button">Open folder</button>
+        </div>
+      </details>
+      <div class="side-foot">
+        <p class="hint">Runs only on this computer.</p>
+        <button class="btn ghost small" id="quit" type="button">Quit</button>
       </div>
-    </div>
-
-    <div class="side-foot">
-      <p class="hint">Runs only on this computer. Nothing runs once you quit.</p>
-      <button class="btn ghost small" id="quit">Quit</button>
     </div>
   </aside>
+
   <main id="main">
-    <div class="empty"><b>Pick a debate or start a new one</b>Results show up first; open any round to read the reasoning.</div>
+    <div id="banner-slot"></div>
+
+    <section class="composer-view" id="composer-view">
+      <div class="hero">
+        <svg class="hero-mark" viewBox="0 0 32 32" aria-hidden="true"><circle cx="16" cy="16" r="12" fill="none" stroke="#D97757" stroke-width="2.6" stroke-dasharray="24 100" stroke-linecap="round"/><circle cx="16" cy="16" r="12" fill="none" stroke="#1f1f1f" stroke-width="2.6" stroke-dasharray="24 100" stroke-dashoffset="-25.1" stroke-linecap="round"/><circle cx="16" cy="16" r="12" fill="none" stroke="#9B72CB" stroke-width="2.6" stroke-dasharray="24 100" stroke-dashoffset="-50.2" stroke-linecap="round"/></svg>
+        <h1 class="hero-title">What should they <em>debate</em>?</h1>
+        <p class="hero-sub">Ask once. Every seat answers on its own, cross-examines the others, then they vote on what holds up.</p>
+      </div>
+
+      <div class="composer">
+        <textarea id="task" rows="3" placeholder="Ask a question worth more than one opinion…"></textarea>
+        <div class="attach-list" id="attach-list"></div>
+        <div class="composer-bar">
+          <input type="file" id="attach-input" multiple accept=".pdf,.png,.jpg,.jpeg,.webp,.gif,.txt,.md,.csv" hidden>
+          <button class="tool-btn" id="attach-btn" type="button" title="Attach PDFs, images or text files">
+            <svg viewBox="0 0 24 24" width="17" height="17" aria-hidden="true"><path d="M21 11.5 12.6 19.9a5.5 5.5 0 0 1-7.8-7.8l8.5-8.5a3.7 3.7 0 0 1 5.2 5.2l-8.5 8.5a1.8 1.8 0 0 1-2.6-2.6l7.8-7.8" fill="none" stroke="currentColor" stroke-width="1.7" stroke-linecap="round" stroke-linejoin="round"/></svg>
+            <span>Attach</span>
+          </button>
+          <label class="tool-select" title="How many rounds of cross-examination, at most">
+            <span>Rounds</span>
+            <select id="rounds"><option>1</option><option>2</option><option selected>3</option><option>4</option><option>5</option></select>
+          </label>
+          <label class="tool-select" title="How many seats must accept a claim for it to count as agreed">
+            <span>Agree</span>
+            <select id="threshold">
+              <option value="1">Everyone</option>
+              <option value="0.67">Two-thirds</option>
+              <option value="0.51">Majority</option>
+            </select>
+          </label>
+          <span class="spacer"></span>
+          <span class="kbd-hint" id="kbd-hint"></span>
+          <button class="btn start" id="start" type="button">Start debate</button>
+        </div>
+      </div>
+      <p class="err" id="form-error" hidden></p>
+
+      <div class="seats-panel">
+        <div class="seats-head">
+          <span class="eyebrow">Seats at the table</span>
+          <button class="link-btn small" id="add-seat" type="button">⟳ Scan for CLIs</button>
+        </div>
+        <div class="seats" id="seats"></div>
+      </div>
+
+      <div class="examples" id="examples">
+        <button type="button" class="example">Monolith or microservices for a two-person startup?</button>
+        <button type="button" class="example">Which first programming language should a beginner learn in 2026?</button>
+        <button type="button" class="example">Should a small SaaS raise prices by 15% this year?</button>
+      </div>
+    </section>
+
+    <section class="run-view" id="run-view" hidden></section>
   </main>
 </div>
 <script>
@@ -611,6 +723,8 @@ details.round > .note:last-child { margin-bottom: 16px; }
   function loadLibrary() {
     return api("/api/library").then(function (lib) {
       var el = document.getElementById("lib-path");
+      var short = document.getElementById("lib-short");
+      short.textContent = String(lib.dir).split(/[\\/]/).filter(Boolean).pop() || lib.dir; short.title = lib.dir;
       el.textContent = lib.dir; el.title = lib.dir + (lib.pdf ? "" : "  (no Edge/Chrome found: PDFs are skipped; open report.html and print it)");
     }).catch(function () {});
   }
@@ -759,21 +873,56 @@ details.round > .note:last-child { margin-bottom: 16px; }
       state.runs = data.runs;
       var box = document.getElementById("runs");
       box.textContent = "";
-      if (data.runs.length === 0) box.appendChild(h("p", { class: "hint", text: "No debates yet." }));
+      if (data.runs.length === 0) box.appendChild(h("p", { class: "hint", style: "padding:0 8px", text: "Your debates will appear here." }));
+      // Grouped like a chat history: Today, Yesterday, Earlier.
+      var lastGroup = null;
       data.runs.forEach(function (run) {
+        var group = dayGroup(run.requestId);
+        if (group !== lastGroup) { box.appendChild(h("div", { class: "group", text: group })); lastGroup = group; }
         var cached = state.cache[run.requestId];
-        var title = run.title || run.prompt || (run.process && run.process.task) || (cached && cached.model.task) || "Debate in progress";
-        box.appendChild(h("button", { class: "run-item" + (state.selected === run.requestId ? " active" : ""), onclick: function () { select(run.requestId); } },
+        var title = run.title || stripAttachmentNote(run.prompt || (run.process && run.process.task) || (cached && cached.model.task) || "") || "Debate in progress";
+        box.appendChild(h("button", { class: "run-item" + (state.selected === run.requestId ? " active" : ""), title: title, onclick: function () { select(run.requestId); } },
           h("span", { class: "t", text: title }),
-          h("span", { class: "m" }, statusPill(runStatus(run)), fmtWhen(run.requestId), run.elapsedMs ? " · " + fmtElapsed(run.elapsedMs) : "")));
+          h("span", { class: "m" }, statusPill(runStatus(run)), fmtWhen(run.requestId), run.saved ? " · saved" : "")));
       });
+      document.getElementById("new-debate").classList.toggle("active", !state.selected);
     }).catch(function () {});
   }
+  function dayGroup(requestId) {
+    var m = /^argue_(\d+)/.exec(requestId);
+    if (!m) return "Earlier";
+    var d = new Date(Number(m[1])); var today = new Date();
+    var start = new Date(today.getFullYear(), today.getMonth(), today.getDate()).getTime();
+    if (d.getTime() >= start) return "Today";
+    if (d.getTime() >= start - 86400000) return "Yesterday";
+    if (d.getTime() >= start - 6 * 86400000) return "This week";
+    return "Earlier";
+  }
+  function stripAttachmentNote(text) {
+    return String(text || "").replace(/\n\nAttached files \(read them as part of the task\):[\s\S]*$/, "");
+  }
+
+  // ---------- switching views: new debate vs an open one ----------
+  function showView(name) {
+    document.getElementById("composer-view").hidden = name !== "composer";
+    document.getElementById("run-view").hidden = name !== "run";
+    window.scrollTo(0, 0);
+  }
+  function showComposer() {
+    clearTimeout(state.pollTimer);
+    state.selected = null;
+    showView("composer");
+    refreshRuns();
+    document.getElementById("task").focus();
+  }
+  document.getElementById("new-debate").addEventListener("click", showComposer);
 
   // ---------- selected run ----------
   function select(requestId) {
     state.selected = requestId;
     if (!state.cache[requestId]) state.cache[requestId] = { events: [], nextSeq: 0, result: null, error: null, process: null, model: emptyModel() };
+    showView("run");
+    document.getElementById("run-view").textContent = "";
     refreshRuns();
     poll();
   }
@@ -898,23 +1047,24 @@ details.round > .note:last-child { margin-bottom: 16px; }
   function render() {
     var c = state.cache[state.selected]; if (!c) return;
     var m = c.model; var result = c.result;
-    var main = document.getElementById("main");
+    // The open debate draws into its own section; the "new debate" composer stays intact beside it.
+    var main = document.getElementById("run-view");
     var scrollY = window.scrollY;
     var openDetails = {};
     [].forEach.call(main.querySelectorAll("details[data-key]"), function (d) { openDetails[d.getAttribute("data-key")] = d.open; });
-    var banner = document.getElementById("stale-banner");
     main.textContent = "";
-    if (banner) main.appendChild(banner);
 
     var run = state.runs.filter(function (r) { return r.requestId === state.selected; })[0];
     var status = result ? result.status : m.failed || c.error ? "failed" : run ? runStatus(run) : "in_progress";
     var title = result && result.task ? result.task.title || result.task.prompt :
       (run && (run.title || run.prompt)) || (c.process && c.process.task) || "Debate";
     var running = c.process && c.process.state === "running";
+    var asked = stripAttachmentNote((result && result.task && result.task.prompt) || (c.process && c.process.task) || (run && run.prompt) || "");
 
+    // Like a chat: your question first, then the panel's answer.
+    if (asked) main.appendChild(h("div", { class: "question" }, h("div", { class: "bubble" }, h("small", { text: "You asked" }), asked)));
     main.appendChild(h("div", { class: "head" },
       h("h1", { text: title }),
-      result && result.task && result.task.title && result.task.prompt !== result.task.title ? h("p", { class: "prompt", text: result.task.prompt }) : null,
       h("div", { class: "meta" }, statusPill(status),
         m.participants.map(function (id) { return h("span", { class: "chip" }, mark(id), id, m.eliminated[id] ? " (out)" : ""); }),
         result && result.metrics ? h("span", { text: fmtElapsed(result.metrics.elapsedMs) + " · " + result.metrics.totalRounds + " rounds" }) : null,
@@ -972,13 +1122,29 @@ details.round > .note:last-child { margin-bottom: 16px; }
   // Puts the same question and seats back in the form so the debate can be rerun or tweaked.
   function runAgain(result) {
     var prompt = result.task && result.task.prompt ? result.task.prompt : "";
-    document.getElementById("task").value = prompt.replace(/\n\nAttached files \(read them as part of the task\):[\s\S]*$/, "");
+    showComposer();
+    document.getElementById("task").value = stripAttachmentNote(prompt);
+    growTask();
     var ids = (result.scoreboard || []).map(function (s) { return s.participantId; });
     [].forEach.call(document.querySelectorAll("#seats input[type=checkbox]"), function (cb) { cb.checked = ids.indexOf(cb.value) >= 0; });
-    var aside = document.querySelector("aside"); if (aside) aside.scrollTop = 0;
-    document.getElementById("task").focus();
     showFormError(ids.some(function (sid) { return !agentInfo(sid); }) ? "Some seats from that debate are no longer set up; pick others." : "");
   }
+
+  // ---------- composer niceties ----------
+  var taskBox = document.getElementById("task");
+  function growTask() {
+    taskBox.style.height = "auto";
+    taskBox.style.height = Math.min(340, Math.max(84, taskBox.scrollHeight)) + "px";
+  }
+  taskBox.addEventListener("input", growTask);
+  var isMac = /Mac|iPhone|iPad/.test(navigator.platform || navigator.userAgent);
+  document.getElementById("kbd-hint").textContent = isMac ? "⌘ ↵" : "Ctrl ↵";
+  taskBox.addEventListener("keydown", function (ev) {
+    if (ev.key === "Enter" && (ev.metaKey || ev.ctrlKey)) { ev.preventDefault(); document.getElementById("start").click(); }
+  });
+  [].forEach.call(document.querySelectorAll(".example"), function (b) {
+    b.addEventListener("click", function () { taskBox.value = b.textContent; growTask(); taskBox.focus(); });
+  });
 
   function setAllRounds(open) {
     [].forEach.call(document.querySelectorAll("details.round"), function (d) { d.open = open; });
@@ -1263,15 +1429,14 @@ details.round > .note:last-child { margin-bottom: 16px; }
     var banner = h("div", { id: "stale-banner", class: "card verdict failed", style: "margin-bottom:18px" },
       h("b", { text: "This page is out of date" }),
       h("p", { class: "rationale", text: "The desk was restarted or closed, so this tab's access link no longer works. Open it again from your shortcut, or use the new link printed in the terminal." }));
-    var main = document.getElementById("main");
-    main.insertBefore(banner, main.firstChild);
+    document.getElementById("banner-slot").appendChild(banner);
   }
 
   if (!token) {
     document.getElementById("main").textContent = "Missing access token. Open the desk from its shortcut or the link printed by argue ui.";
     return;
   }
-  loadConfig().then(function () { loadUsage(); loadLibrary(); scanClis().catch(function () {}); return refreshRuns(); }).then(function () { if (state.runs[0]) select(state.runs[0].requestId); });
+  loadConfig().then(function () { loadUsage(); loadLibrary(); scanClis().catch(function () {}); return refreshRuns(); }).then(function () { showView("composer"); });
   setInterval(function () { if (!state.closed) refreshRuns(); }, 5000);
   setInterval(loadUsage, 30000);
 })();

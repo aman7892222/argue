@@ -28,6 +28,7 @@ import { defaultOutputDirTemplate, resolveRunPlan } from "./run-plan.js";
 import { createTaskDelegate } from "./runtime/delegate.js";
 import { createSpinner } from "./spinner.js";
 import { startUiServer } from "./ui/server.js";
+import { writeDeskShortcut } from "./ui/shortcut.js";
 import { launchBrowser, MAX_ENCODED_BYTES, openReportInViewer, resolveLatestRequestId } from "./view.js";
 import { VENDOR_PRESETS, getVendorNames } from "./vendors.js";
 export type { CliSdkProviderAdapter, CreateCliSdkProviderAdapter, ProviderTaskRunnerArgs } from "./runtime/types.js";
@@ -171,6 +172,12 @@ async function runUi(args: string[], io: Pick<typeof console, "log" | "error">):
       const next = args[i + 1];
       idleMinutes = next !== undefined && /^\d+(\.\d+)?$/.test(next) ? Number(args[++i]) : 3;
       if (!(idleMinutes > 0)) return usageError(io, "--exit-when-idle minutes must be > 0");
+    } else if (arg === "--make-shortcut") {
+      // Writes a double-click launcher (Windows .cmd / macOS .command / Linux .sh) here and exits.
+      const path = await writeDeskShortcut(process.cwd());
+      io.log(`[argue] created ${path}`);
+      io.log("  double-click it to open the debate desk from this folder");
+      return { ok: true, code: 0 };
     } else {
       return usageError(io, `Unknown option for ui: ${arg}`);
     }
@@ -1645,6 +1652,7 @@ function printHelp(io: Pick<typeof console, "log">): void {
     "  argue act --result <path> --task <prompt> [--agent <id>] [--config <path>] [--no-action-full-result] [--no-color]"
   );
   io.log("  argue ui [--config <path>] [--port <n>] [--no-open] [--exit-when-idle [min]]  # local web UI");
+  io.log("  argue ui --make-shortcut          # write a double-click launcher (Windows/macOS/Linux) here");
   io.log("  argue models [--json] [--no-list] # find installed agent CLIs, their models, and add commands");
   io.log("  argue config init                # create empty config file");
   io.log("  argue config add-provider ...    # append provider to config");

@@ -65,7 +65,7 @@ export const KNOWN_CLIS: KnownCli[] = [
     label: "Google Antigravity",
     listModelsArgs: ["models"],
     parseModels: parseTabularModels,
-    knownPaths: ["{localappdata}/agy/bin/agy.exe"],
+    knownPaths: ["{localappdata}/agy/bin/agy.exe", "{home}/.local/bin/agy"],
     install:
       "winget install Google.AntigravityCLI  (macOS/Linux: curl -fsSL https://antigravity.google/cli/install.sh | bash)"
   },

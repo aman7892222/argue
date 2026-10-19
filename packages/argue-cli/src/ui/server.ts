@@ -420,7 +420,9 @@ export async function startUiServer(options: UiServerOptions = {}): Promise<UiSe
         cwd: loaded.configDir,
         env: { ...process.env, NO_COLOR: "1" },
         stdio: ["ignore", "ignore", "pipe"],
-        windowsHide: true
+        windowsHide: true,
+        // Own process group on macOS/Linux, so Stop/Quit can end the agent CLIs too (see killTree).
+        detached: process.platform !== "win32"
       });
       const run: LaunchedRun = {
         requestId,
@@ -872,6 +874,16 @@ function killTree(child: ChildProcess): void {
   if (process.platform === "win32" && child.pid) {
     nodeSpawn("taskkill", ["/pid", String(child.pid), "/T", "/F"], { stdio: "ignore", windowsHide: true });
     return;
+  }
+  // macOS/Linux: runs start in their own process group, so signal the whole group
+  // (argue and every agent CLI it started), not just argue itself.
+  if (child.pid) {
+    try {
+      process.kill(-child.pid, "SIGTERM");
+      return;
+    } catch {
+      // group already gone; fall through
+    }
   }
   child.kill("SIGTERM");
 }
