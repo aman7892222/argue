@@ -277,7 +277,7 @@ describe("parseStartRequest", () => {
     expect(parseStartRequest({ task: "t", agents: ["a1", "a2"], threshold: 1.5 }, loaded).ok).toBe(false);
     expect(parseStartRequest({ task: " t ", agents: ["a1", "a2"] }, loaded)).toEqual({
       ok: true,
-      value: { task: "t", agents: ["a1", "a2"], maxRounds: 3, threshold: 1 }
+      value: { task: "t", agents: ["a1", "a2"], maxRounds: 3, threshold: 1, settings: {} }
     });
   });
 });

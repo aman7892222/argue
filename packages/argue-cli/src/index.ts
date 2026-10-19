@@ -11,6 +11,7 @@ import {
   DEFAULT_VIEWER_URL,
   loadCliConfig,
   loadRawCliConfig,
+  loadWorkspaceConfig,
   readJsonFile,
   ProviderSchema,
   resolveConfigPath,
@@ -35,6 +36,9 @@ export type CliRunOptions = {
   configPath?: string;
   inputPath?: string;
   agents?: string[];
+  /** Per-run model and effort overrides by agent id; the config file is not changed. */
+  agentModels?: Record<string, string>;
+  agentEfforts?: Record<string, string>;
   requestId?: string;
   task?: string;
   jsonlPath?: string;
@@ -171,8 +175,20 @@ async function runUi(args: string[], io: Pick<typeof console, "log" | "error">):
   }
 
   try {
-    // Fail fast on a missing/invalid config rather than serving a broken page.
-    const loaded = await loadCliConfig({ explicitPath: configPath });
+    // First run: no config anywhere yet, so start an empty workspace here and let the
+    // desk's "Scan for CLIs" fill it. An invalid existing config still fails fast.
+    if (!configPath) {
+      try {
+        await resolveConfigPath({});
+      } catch {
+        const created = resolve(process.cwd(), "argue.config.json");
+        await writeFile(created, `${JSON.stringify({ schemaVersion: 1, providers: {}, agents: [] }, null, 2)}\n`, {
+          flag: "wx"
+        });
+        io.log(`[argue] created ${created} (add seats from the page)`);
+      }
+    }
+    const loaded = await loadWorkspaceConfig({ explicitPath: configPath });
     const server = await startUiServer({
       configPath: loaded.configPath,
       ...(port !== undefined ? { port } : {}),
@@ -197,6 +213,28 @@ async function runUi(args: string[], io: Pick<typeof console, "log" | "error">):
   } catch (error) {
     io.error(String(error));
     return { ok: false, code: 1 };
+  }
+}
+
+/** Applies --model-for / --effort-for to the in-memory config for this run only. */
+export function applyAgentOverrides(
+  loaded: LoadedCliConfig,
+  models: Record<string, string> | undefined,
+  efforts: Record<string, string> | undefined
+): void {
+  for (const [id, model] of Object.entries(models ?? {})) {
+    const agent = loaded.config.agents.find((a) => a.id === id);
+    if (!agent) throw new Error(`--model-for: unknown agent id "${id}"`);
+    const provider = loaded.config.providers[agent.provider];
+    if (!provider) throw new Error(`--model-for: agent "${id}" has no provider`);
+    // A model the provider has not listed yet is used as its own provider model id.
+    provider.models[model] ??= {};
+    agent.model = model;
+  }
+  for (const [id, effort] of Object.entries(efforts ?? {})) {
+    const agent = loaded.config.agents.find((a) => a.id === id);
+    if (!agent) throw new Error(`--effort-for: unknown agent id "${id}"`);
+    agent.reasoning = effort;
   }
 }
 
@@ -254,6 +292,7 @@ async function runHeadless(args: string[], io: Pick<typeof console, "log" | "err
   let loadedConfig;
   try {
     loadedConfig = await loadCliConfig({ explicitPath: options.value.configPath } satisfies ResolveConfigPathOptions);
+    applyAgentOverrides(loadedConfig, options.value.agentModels, options.value.agentEfforts);
   } catch (error) {
     io.error(String(error));
     return { ok: false, code: 1 };
@@ -940,6 +979,24 @@ function parseRunOptions(args: string[]): { ok: true; value: CliRunOptions } | {
       continue;
     }
 
+    if (arg === "--model-for" || arg === "--effort-for") {
+      // Repeatable: --model-for claude=sonnet --effort-for claude=high (this run only).
+      const value = args[i + 1] ?? "";
+      const eq = value.indexOf("=");
+      const id = value.slice(0, eq).trim();
+      const setting = value.slice(eq + 1).trim();
+      if (eq <= 0 || !setting || /[\r\n]/.test(setting) || setting.length > 200) {
+        return { ok: false, error: `${arg} expects <agent-id>=<value>` };
+      }
+      if (arg === "--effort-for" && !/^[a-z]+$/.test(setting)) {
+        return { ok: false, error: "--effort-for level must be a lowercase word such as high" };
+      }
+      const target = arg === "--model-for" ? (out.agentModels ??= {}) : (out.agentEfforts ??= {});
+      target[id] = setting;
+      i += 1;
+      continue;
+    }
+
     if (arg === "--request-id") {
       const value = args[i + 1];
       if (!value) return { ok: false, error: "--request-id requires a value" };
@@ -1563,6 +1620,7 @@ function printHelp(io: Pick<typeof console, "log">): void {
   io.log("  --config <path>                 config JSON path");
   io.log("  --input <path>                  run input JSON path (task/agents etc.)");
   io.log("  --agents a,b,c                  override selected agents");
+  io.log("  --model-for id=model  --effort-for id=level   per-run model / effort for a seat (repeatable)");
   io.log("  --task <text>");
   io.log("  --request-id <id>");
   io.log("  --jsonl <path> --result <path> --summary <path>");

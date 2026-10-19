@@ -158,21 +158,13 @@ export function resolveRunPlan(args: {
     ? { prompt: actionPrompt, ...(actionActorId ? { actorId: actionActorId } : {}), includeFullResult }
     : undefined;
 
-  const defaultOutputDir = defaultOutputDirTemplate(loadedConfig);
-  const jsonlRaw = overrides.jsonlPath ?? loadedConfig.config.output?.jsonlPath ?? `${defaultOutputDir}/events.jsonl`;
-  const resultRaw = overrides.resultPath ?? loadedConfig.config.output?.resultPath ?? `${defaultOutputDir}/result.json`;
-  const summaryRaw =
-    overrides.summaryPath ?? loadedConfig.config.output?.summaryPath ?? `${defaultOutputDir}/summary.md`;
-  const errorRaw = `${defaultOutputDir}/error.json`;
+  const paths = resolveOutputPaths(loadedConfig, requestId, overrides);
 
   return {
     requestId,
     task,
     participantIds,
-    jsonlPath: resolveOutputPath(jsonlRaw, loadedConfig.configDir, requestId),
-    resultPath: resolveOutputPath(resultRaw, loadedConfig.configDir, requestId),
-    summaryPath: resolveOutputPath(summaryRaw, loadedConfig.configDir, requestId),
-    errorPath: resolveOutputPath(errorRaw, loadedConfig.configDir, requestId),
+    ...paths,
     startInput: {
       requestId,
       task,
@@ -202,6 +194,26 @@ export function resolveRunPlan(args: {
       ...(runInput.context ? { context: runInput.context } : {}),
       ...(actionPolicy ? { actionPolicy } : {})
     }
+  };
+}
+
+/** Where a run's files go; shared by `argue run` and the debate desk so they always agree. */
+export function resolveOutputPaths(
+  loadedConfig: LoadedCliConfig,
+  requestId: string,
+  overrides: Pick<RunOverrides, "jsonlPath" | "resultPath" | "summaryPath"> = {}
+): { jsonlPath: string; resultPath: string; summaryPath: string; errorPath: string } {
+  const defaultOutputDir = defaultOutputDirTemplate(loadedConfig);
+  const output = loadedConfig.config.output;
+  const jsonlRaw = overrides.jsonlPath ?? output?.jsonlPath ?? `${defaultOutputDir}/events.jsonl`;
+  const resultRaw = overrides.resultPath ?? output?.resultPath ?? `${defaultOutputDir}/result.json`;
+  const summaryRaw = overrides.summaryPath ?? output?.summaryPath ?? `${defaultOutputDir}/summary.md`;
+  const errorRaw = `${defaultOutputDir}/error.json`;
+  return {
+    jsonlPath: resolveOutputPath(jsonlRaw, loadedConfig.configDir, requestId),
+    resultPath: resolveOutputPath(resultRaw, loadedConfig.configDir, requestId),
+    summaryPath: resolveOutputPath(summaryRaw, loadedConfig.configDir, requestId),
+    errorPath: resolveOutputPath(errorRaw, loadedConfig.configDir, requestId)
   };
 }
 

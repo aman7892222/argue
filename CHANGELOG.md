@@ -13,7 +13,11 @@ Fork of [onevcat/argue](https://github.com/onevcat/argue) by aman7892222. Headli
 
 ### Features
 
-- Debate desk: ChatGPT's seat theme is now green (`#10A37F`) with a six-petal ✾ mark, matching the Claude and Gemini treatments.
+- Debate desk: ChatGPT's seat theme now matches its app icon, a monochrome knot (white on a dark tile in chips, charcoal on its ring).
+- Debate desk: per-seat **model and effort pickers** for each debate, filled from each CLI's catalog: every Antigravity model (Argon low, medium and high, and more), Codex models with their own reasoning levels, and Claude's opus, sonnet, haiku and fable with low to max effort. Picks are remembered in the browser.
+- `argue run --model-for <agent>=<model>` and `--effort-for <agent>=<level>` (repeatable) override a seat for one run without editing the config.
+- Debate desk: **Scan for CLIs** lists every installed agent CLI, with one-click Add, "seated as …" badges and Scan again.
+- First run: `argue ui` with no config creates an empty `./argue.config.json`, and the desk works with 0 or 1 seats while you set it up (`argue run` still needs two).
 - New `argue ui` debate desk: a local web page for starting debates and watching them live, round by round. It shows each seat's claims; its judgements with stance, confidence, rationale and proposed rewording; merges; final votes with reasons; the verdict; claim tallies; and peer scores. It also lists runs started from the CLI or other sessions. It's served only on 127.0.0.1, with a per-launch API token and a Host-header check. Stopping a run also stops the agent CLIs it started.
 - Debate desk: results (verdict, claims, scores) come first, and each round folds into a one-line summary with per-seat status and stance totals, plus Expand all and Collapse all.
 - Debate desk: usage rings per seat. Claude shows 5-hour and 7-day utilization from its `rate_limit_event`, Codex shows its 5-hour and weekly `rate_limits` from its session logs, and Antigravity shows the tokens argue used today, since agy does not expose its quota. Hover a ring to see reset times.

@@ -4,9 +4,9 @@ import { createReadStream } from "node:fs";
 import { readdir, readFile, stat } from "node:fs/promises";
 import { createServer, type IncomingMessage, type Server, type ServerResponse } from "node:http";
 import { fileURLToPath } from "node:url";
-import { loadCliConfig, type LoadedCliConfig } from "../config.js";
+import { loadWorkspaceConfig, type LoadedCliConfig } from "../config.js";
 import { newRequestId, REQUEST_ID_PATTERN } from "../request-id.js";
-import { resolveRunPlan } from "../run-plan.js";
+import { resolveOutputPaths, resolveRunPlan } from "../run-plan.js";
 import { detectClis } from "../cli-catalog.js";
 import { readSeatUsage } from "../usage.js";
 import { addSeat, parseAddSeatRequest, removeSeat } from "./seats.js";
@@ -61,7 +61,8 @@ export async function startUiServer(options: UiServerOptions = {}): Promise<UiSe
   const launched = new Map<string, LaunchedRun>();
   const runCommand = options.runCommand ?? defaultRunCommand();
 
-  const loadConfig = (): Promise<LoadedCliConfig> => loadCliConfig({ explicitPath: options.configPath });
+  // Workspace loader: the desk must work with 0 or 1 seats while you are setting it up.
+  const loadConfig = (): Promise<LoadedCliConfig> => loadWorkspaceConfig({ explicitPath: options.configPath });
   let lastSeen = Date.now();
   let resolveClosed: () => void = () => {};
   const closed = new Promise<void>((resolve) => (resolveClosed = resolve));
@@ -142,6 +143,9 @@ export async function startUiServer(options: UiServerOptions = {}): Promise<UiSe
           path: d.path,
           models: d.models,
           modelHint: d.cli.modelHint ?? null,
+          efforts: d.efforts,
+          effortsByModel: d.effortsByModel,
+          modelNotes: d.cli.modelNotes ?? {},
           note: d.cli.note ?? null,
           install: d.cli.install
         }))
@@ -310,6 +314,10 @@ export async function startUiServer(options: UiServerOptions = {}): Promise<UiSe
         String(request.value.maxRounds),
         "--threshold",
         String(request.value.threshold),
+        ...Object.entries(request.value.settings).flatMap(([id, s]) => [
+          ...(s.model && request.value.agents.includes(id) ? ["--model-for", `${id}=${s.model}`] : []),
+          ...(s.effort && request.value.agents.includes(id) ? ["--effort-for", `${id}=${s.effort}`] : [])
+        ]),
         "--no-color"
       ];
       const child = nodeSpawn(runCommand.command, args, {
@@ -384,7 +392,13 @@ export function isLoopbackHost(host: string | undefined, port: number): boolean 
   return host === `127.0.0.1:${port}` || host === `localhost:${port}` || host === `[::1]:${port}`;
 }
 
-type StartRequest = { task: string; agents: string[]; maxRounds: number; threshold: number };
+type StartRequest = {
+  task: string;
+  agents: string[];
+  maxRounds: number;
+  threshold: number;
+  settings: Record<string, { model?: string; effort?: string }>;
+};
 
 export function parseStartRequest(
   body: unknown,
@@ -413,33 +427,34 @@ export function parseStartRequest(
     return { ok: false, error: "threshold must be in (0, 1]" };
   }
 
-  return { ok: true, value: { task, agents: [...new Set(agents)], maxRounds, threshold } };
+  // Per-seat model / effort for this debate only: { seatId: { model?, effort? } }.
+  const settings: StartRequest["settings"] = {};
+  if (input.settings !== undefined) {
+    if (!input.settings || typeof input.settings !== "object" || Array.isArray(input.settings)) {
+      return { ok: false, error: "settings must be an object keyed by seat" };
+    }
+    for (const [id, raw] of Object.entries(input.settings as Record<string, unknown>)) {
+      if (!known.has(id)) return { ok: false, error: `settings: unknown seat ${id}` };
+      const s = (raw ?? {}) as { model?: unknown; effort?: unknown };
+      const model = typeof s.model === "string" ? s.model.trim() : "";
+      const effort = typeof s.effort === "string" ? s.effort.trim() : "";
+      if (model && (model.length > 200 || /[\s"'`]/.test(model)))
+        return { ok: false, error: `settings: bad model for ${id}` };
+      if (effort && !/^[a-z]+$/.test(effort)) return { ok: false, error: `settings: bad effort for ${id}` };
+      settings[id] = { ...(model ? { model } : {}), ...(effort ? { effort } : {}) };
+    }
+  }
+
+  return { ok: true, value: { task, agents: [...new Set(agents)], maxRounds, threshold, settings } };
 }
 
 /** Output paths for one run, resolved the same way `argue run` resolves them. */
 export function runPathsFor(loaded: LoadedCliConfig, requestId: string): RunPaths {
-  const plan = resolveRunPlan({
-    loadedConfig: loaded,
-    runInput: {},
-    // Agents/task only satisfy validation; the paths depend on config + requestId alone.
-    overrides: {
-      requestId,
-      task: "-",
-      agents: loaded.config.agents.length >= 2 ? loaded.config.agents.map((a) => a.id) : ["a", "b"]
-    }
-  });
-  return {
-    requestId,
-    jsonlPath: plan.jsonlPath,
-    resultPath: plan.resultPath,
-    summaryPath: plan.summaryPath,
-    errorPath: plan.errorPath
-  };
+  return { requestId, ...resolveOutputPaths(loaded, requestId) };
 }
 
 /** Lists runs (finished or still running) by scanning the directory that holds the `{requestId}` path segment. */
 export async function listRuns(loaded: LoadedCliConfig): Promise<RunPaths[]> {
-  if (loaded.config.agents.length < 2) return [];
   const template = runPathsFor(loaded, TOKEN_PLACEHOLDER).jsonlPath;
   const tokenIdx = template.indexOf(TOKEN_PLACEHOLDER);
   if (tokenIdx === -1) return [];

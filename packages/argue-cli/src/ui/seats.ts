@@ -1,5 +1,5 @@
 import { readFile, writeFile } from "node:fs/promises";
-import { CLI_TYPES, CliConfigSchema, defaultCliCommand, type CliType } from "../config.js";
+import { CLI_TYPES, defaultCliCommand, WorkspaceConfigSchema, type CliType } from "../config.js";
 
 /** Adding and removing CLI seats (provider + agent) in the workspace config, for the debate desk. */
 
@@ -60,7 +60,7 @@ async function readRaw(configPath: string): Promise<RawConfig> {
 
 async function writeValidated(configPath: string, config: RawConfig): Promise<void> {
   // Refuse to write anything argue itself would reject.
-  CliConfigSchema.parse(config);
+  WorkspaceConfigSchema.parse(config);
   await writeFile(configPath, `${JSON.stringify(config, null, 2)}\n`, "utf8");
 }
 

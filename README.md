@@ -87,6 +87,16 @@ Results come first: the verdict, the claims with their tallies, and the peer sco
 
 These limits are shared with your other use of each plan. The Claude ring updates whenever a debate calls Claude, and the Codex ring whenever Codex runs anywhere.
 
+**First run.** On a fresh machine, `argue ui` creates an empty `argue.config.json` in the current folder. Click **Scan for CLIs** and every agent CLI installed on the computer shows up, ready to add in one click.
+
+**Pick the model and effort for each debate.** Every seat has its own model and effort picker, filled from what that CLI offers on your plan:
+
+- Antigravity: every model `agy models` lists. The effort is part of the name, for example `gemini-4-argon-low`, `-medium` and `-high`.
+- Codex: its model catalog, with each model's own effort levels.
+- Claude Code: `opus`, `sonnet`, `haiku` and `fable` (which can bill extra credits on some plans), with `low` to `max` effort.
+
+Your picks only apply to that debate (they're passed as `argue run --model-for <seat>=<model> --effort-for <seat>=<level>`), so your config never changes, and the page remembers them next time.
+
 **Seats from the page.** Use **+ Connect another CLI** to see which agent CLIs are installed and what models each offers. Listing models asks each CLI for its catalog; it sends no prompts and uses no tokens. Pick a CLI and a model, or choose **Other CLI** to seat any command that reads a prompt and prints an answer. To remove a seat, hover it and click **×**.
 
 **Nothing keeps running.** Click **Quit** on the page (or press Ctrl+C) to stop the desk and any debate it started. With `argue ui --exit-when-idle [minutes]` (default 3), the desk also stops by itself that long after its page is closed.

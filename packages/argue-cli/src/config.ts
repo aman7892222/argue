@@ -199,7 +199,18 @@ const CliConfigSchemaBase = z
   })
   .strict();
 
-export const CliConfigSchema = CliConfigSchemaBase.superRefine((config, ctx) => {
+export const CliConfigSchema = CliConfigSchemaBase.superRefine(checkConfigConsistency);
+
+/**
+ * Same checks as CliConfigSchema, but a workspace may hold 0 or 1 seats while it is being set
+ * up (the debate desk adds seats one at a time). `argue run` still requires two.
+ */
+export const WorkspaceConfigSchema = CliConfigSchemaBase.extend({
+  providers: z.record(ProviderSchema),
+  agents: z.array(AgentSchema)
+}).superRefine(checkConfigConsistency);
+
+function checkConfigConsistency(config: z.infer<typeof CliConfigSchemaBase>, ctx: z.RefinementCtx): void {
   const seen = new Set<string>();
 
   for (const [index, agent] of config.agents.entries()) {
@@ -250,7 +261,7 @@ export const CliConfigSchema = CliConfigSchemaBase.superRefine((config, ctx) => 
       });
     }
   }
-});
+}
 
 export type CliConfig = z.infer<typeof CliConfigSchema>;
 export type ProviderModelConfig = z.infer<typeof ProviderModelSchema>;
@@ -314,6 +325,13 @@ export async function loadCliConfig(options: ResolveConfigPathOptions = {}): Pro
     configDir: dirname(configPath),
     config: parsed
   };
+}
+
+/** Loads a config for the debate desk: all of loadCliConfig's checks, but 0 or 1 seats are allowed. */
+export async function loadWorkspaceConfig(options: ResolveConfigPathOptions = {}): Promise<LoadedCliConfig> {
+  const configPath = await resolveConfigPath(options);
+  const parsed = WorkspaceConfigSchema.parse(await readJsonFile(configPath));
+  return { configPath, configDir: dirname(configPath), config: parsed as CliConfig };
 }
 
 export type RawCliConfig = {

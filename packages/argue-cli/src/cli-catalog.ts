@@ -13,6 +13,12 @@ export interface KnownCli {
   parseModels?: (stdout: string) => string[];
   /** Model ids/aliases to suggest when the CLI cannot list its own models. */
   suggestedModels?: string[];
+  /** Effort (reasoning) levels the CLI accepts for every model. */
+  efforts?: string[];
+  /** Per-model effort levels parsed from the model listing (overrides `efforts`). */
+  parseEfforts?: (stdout: string) => Record<string, string[]>;
+  /** Short warnings shown next to specific models. */
+  modelNotes?: Record<string, string>;
   /** Shown when the CLI cannot list models (where to find valid ids). */
   modelHint?: string;
   install: string;
@@ -27,6 +33,8 @@ export const KNOWN_CLIS: KnownCli[] = [
     command: "claude",
     label: "Claude Code",
     suggestedModels: ["opus", "sonnet", "haiku", "fable"],
+    efforts: ["low", "medium", "high", "xhigh", "max"],
+    modelNotes: { fable: "may bill extra usage credits on some plans" },
     // The native installer puts claude here without always adding it to PATH.
     knownPaths: ["{home}/.local/bin/claude.exe", "{home}/.local/bin/claude"],
     install: "irm https://claude.ai/install.ps1 | iex  (macOS/Linux: curl -fsSL https://claude.ai/install.sh | bash)",
@@ -38,6 +46,7 @@ export const KNOWN_CLIS: KnownCli[] = [
     label: "OpenAI Codex",
     listModelsArgs: ["debug", "models"],
     parseModels: parseCodexModelCatalog,
+    parseEfforts: parseCodexEffortLevels,
     modelHint: "run `codex` and use /model to see ids available on your plan",
     install: "npm install -g @openai/codex@latest, then `codex login`"
   },
@@ -106,6 +115,27 @@ export function parseCodexModelCatalog(stdout: string): string[] {
     .map((m) => m.slug);
 }
 
+/** `codex debug models` JSON: picker-visible model -> its supported reasoning levels. */
+export function parseCodexEffortLevels(stdout: string): Record<string, string[]> {
+  let parsed: unknown;
+  try {
+    parsed = JSON.parse(stdout);
+  } catch {
+    return {};
+  }
+  const list = Array.isArray(parsed) ? parsed : (parsed as { models?: unknown })?.models;
+  if (!Array.isArray(list)) return {};
+  const out: Record<string, string[]> = {};
+  for (const m of list as Array<{ slug?: unknown; visibility?: unknown; supported_reasoning_levels?: unknown }>) {
+    if (typeof m?.slug !== "string" || (m.visibility !== undefined && m.visibility !== "list")) continue;
+    const levels = Array.isArray(m.supported_reasoning_levels) ? m.supported_reasoning_levels : [];
+    out[m.slug] = levels
+      .map((l) => (typeof l === "string" ? l : (l as { effort?: unknown })?.effort))
+      .filter((l): l is string => typeof l === "string" && /^[a-z]+$/.test(l));
+  }
+  return out;
+}
+
 /** Resolves a command on PATH (honouring PATHEXT on Windows); returns its full path or null. */
 export async function findOnPath(
   command: string,
@@ -156,6 +186,8 @@ export interface DetectedCli {
   path: string | null;
   models: string[];
   modelsSource: "listed" | "suggested" | "none";
+  efforts: string[];
+  effortsByModel: Record<string, string[]>;
   listError?: string;
 }
 
@@ -175,14 +207,17 @@ export async function detectClis(options: {
         cli,
         path,
         models: suggested,
-        modelsSource: suggested.length > 0 ? "suggested" : "none"
+        modelsSource: suggested.length > 0 ? "suggested" : "none",
+        efforts: cli.efforts ?? [],
+        effortsByModel: {}
       };
       if (!path || !list || !cli.listModelsArgs || !cli.parseModels) return fallback;
 
       try {
         const stdout = await captureStdout(path, cli.listModelsArgs, env, timeoutMs);
         const models = cli.parseModels(stdout);
-        return models.length > 0 ? { cli, path, models, modelsSource: "listed" } : fallback;
+        const effortsByModel = cli.parseEfforts?.(stdout) ?? {};
+        return models.length > 0 ? { ...fallback, models, modelsSource: "listed", effortsByModel } : fallback;
       } catch (error) {
         return { ...fallback, listError: error instanceof Error ? error.message : String(error) };
       }

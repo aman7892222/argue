@@ -13,7 +13,7 @@ const PAGE = String.raw`<!doctype html>
 <meta charset="utf-8">
 <meta name="viewport" content="width=device-width, initial-scale=1">
 <title>argue · debate desk</title>
-<link rel="icon" href="data:image/svg+xml,%3Csvg xmlns='http://www.w3.org/2000/svg' viewBox='0 0 32 32'%3E%3Ccircle cx='16' cy='16' r='13' fill='none' stroke='%23D97757' stroke-width='4' stroke-dasharray='27 100'/%3E%3Ccircle cx='16' cy='16' r='13' fill='none' stroke='%2310A37F' stroke-width='4' stroke-dasharray='27 100' stroke-dashoffset='-27.2'/%3E%3Ccircle cx='16' cy='16' r='13' fill='none' stroke='%239B72CB' stroke-width='4' stroke-dasharray='27 100' stroke-dashoffset='-54.4'/%3E%3C/svg%3E">
+<link rel="icon" href="data:image/svg+xml,%3Csvg xmlns='http://www.w3.org/2000/svg' viewBox='0 0 32 32'%3E%3Ccircle cx='16' cy='16' r='13' fill='none' stroke='%23D97757' stroke-width='4' stroke-dasharray='27 100'/%3E%3Ccircle cx='16' cy='16' r='13' fill='none' stroke='%231f1f1f' stroke-width='4' stroke-dasharray='27 100' stroke-dashoffset='-27.2'/%3E%3Ccircle cx='16' cy='16' r='13' fill='none' stroke='%239B72CB' stroke-width='4' stroke-dasharray='27 100' stroke-dashoffset='-54.4'/%3E%3C/svg%3E">
 <style>
 :root {
   --bg: #f6f2ea; --bg2: #efe9de; --panel: #fffdf9; --ink: #1d1b18; --ink2: #3a3631; --muted: #7a736a; --line: #e6dfd3;
@@ -25,7 +25,7 @@ const PAGE = String.raw`<!doctype html>
   --mono: "Cascadia Mono", "SF Mono", Consolas, ui-monospace, monospace;
   --shadow: 0 1px 1px rgba(40, 30, 10, .04), 0 6px 22px rgba(40, 30, 10, .06);
   --claude: #D97757; --claude-soft: #fbeae2;
-  --codex: #10A37F; --codex-soft: #e2f4ee;
+  --codex: #1f1f1f; --codex-soft: #e9e8e6;
   --gemini: #7b6fd8; --gemini-soft: #ecebfb;
   --gemini-g: linear-gradient(100deg, #4285F4 0%, #9B72CB 55%, #D96570 100%);
 }
@@ -78,19 +78,22 @@ main { padding: 34px 44px 90px; min-width: 0; max-width: 1180px; }
 .card { background: var(--panel); border: 1px solid var(--line); border-radius: 16px; box-shadow: var(--shadow); }
 .form { padding: 16px; display: grid; gap: 13px; }
 label.field, .field { display: grid; gap: 6px; font-size: 12.5px; color: var(--muted); font-weight: 650; }
+.field .hint { font-weight: 400; }
 textarea, select, input[type=text] { width: 100%; border: 1px solid var(--line); border-radius: 10px; padding: 9px 11px; background: #fff; font-weight: 400; color: var(--ink); }
 textarea { min-height: 92px; resize: vertical; line-height: 1.5; }
 textarea:focus, select:focus, input[type=text]:focus { outline: none; border-color: var(--focus); box-shadow: 0 0 0 3px rgba(201, 185, 158, .3); }
 .seats { display: grid; gap: 6px; }
-.seat-opt { position: relative; display: flex; align-items: center; gap: 10px; padding: 8px 10px; border: 1px solid var(--line); border-radius: 11px;
-  cursor: pointer; color: var(--ink); font-weight: 600; background: #fff; transition: border-color .15s; }
+.seat-opt { position: relative; display: grid; gap: 7px; padding: 9px 10px; border: 1px solid var(--line); border-radius: 12px;
+  color: var(--ink); font-weight: 600; background: #fff; transition: border-color .15s; }
 .seat-opt:hover { border-color: #d5cab6; }
-.seat-opt input { accent-color: var(--ink); margin: 0; }
-.seat-opt small { color: var(--muted); font-weight: 450; margin-left: auto; font-size: 11.5px; max-width: 132px; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
-.seat-opt .rm { display: none; position: absolute; right: 6px; top: 50%; transform: translateY(-50%); border: 0; background: var(--panel); color: var(--muted);
+.seat-main { display: flex; align-items: center; gap: 10px; cursor: pointer; padding-right: 26px; }
+.seat-main input { accent-color: var(--ink); margin: 0; }
+.seat-pick { display: grid; grid-template-columns: minmax(0, 1fr) minmax(0, 1fr); gap: 6px; }
+.seat-pick select.pick { padding: 4px 7px; font-size: 12px; border-radius: 8px; color: var(--ink2); background: #fdfbf7; min-width: 0; }
+.seat-pick:has(select.pick[style*="none"]) select.pick:first-child { grid-column: 1 / -1; }
+.seat-opt .rm { display: none; position: absolute; right: 6px; top: 7px; border: 0; background: var(--panel); color: var(--muted);
   width: 24px; height: 24px; border-radius: 7px; font-size: 15px; line-height: 1; }
-.seat-opt:hover .rm { display: block; }
-.seat-opt:hover small { visibility: hidden; }
+.seat-opt:hover .rm, .seat-opt:focus-within .rm { display: block; }
 .seat-opt .rm:hover { color: var(--disagree); background: var(--disagree-bg); }
 .mark { width: 20px; height: 20px; border-radius: 50%; display: inline-grid; place-items: center; font-size: 11px; font-weight: 700; flex: none; }
 .link-btn { border: 1px dashed #d8cdb9; background: transparent; border-radius: 11px; padding: 8px 10px; color: var(--ink2); font-weight: 600; font-size: 13px; text-align: left; }
@@ -228,7 +231,8 @@ details.round > .note:last-child { margin-bottom: 16px; }
 .modal { width: min(560px, 100%); max-height: calc(100vh - 32px); overflow-y: auto; padding: 22px 24px; }
 .modal h2 { font: 600 22px/1.3 var(--serif); margin: 0 0 4px; }
 .cli-list { display: grid; gap: 7px; margin: 14px 0; }
-.cli-opt { display: flex; align-items: center; gap: 10px; padding: 10px 12px; border: 1px solid var(--line); border-radius: 12px; background: #fff; text-align: left; }
+.cli-opt { display: flex; align-items: center; gap: 10px; padding: 10px 12px; border: 1px solid var(--line); border-radius: 12px; background: #fff; text-align: left; cursor: pointer; }
+.cli-opt:hover { border-color: #d5cab6; }
 .cli-opt.sel { border-color: var(--ink); box-shadow: 0 0 0 1px var(--ink); }
 .cli-opt small { color: var(--muted); display: block; font-size: 11.5px; }
 .cli-opt .pick { margin-left: auto; }
@@ -249,7 +253,7 @@ details.round > .note:last-child { margin-bottom: 16px; }
 <div class="app">
   <aside>
     <div class="brand">
-      <svg viewBox="0 0 32 32" aria-hidden="true"><circle cx="16" cy="16" r="12" fill="none" stroke="#D97757" stroke-width="4" stroke-dasharray="24 100"/><circle cx="16" cy="16" r="12" fill="none" stroke="#10A37F" stroke-width="4" stroke-dasharray="24 100" stroke-dashoffset="-25.1"/><circle cx="16" cy="16" r="12" fill="none" stroke="#9B72CB" stroke-width="4" stroke-dasharray="24 100" stroke-dashoffset="-50.2"/></svg>
+      <svg viewBox="0 0 32 32" aria-hidden="true"><circle cx="16" cy="16" r="12" fill="none" stroke="#D97757" stroke-width="4" stroke-dasharray="24 100"/><circle cx="16" cy="16" r="12" fill="none" stroke="#1f1f1f" stroke-width="4" stroke-dasharray="24 100" stroke-dashoffset="-25.1"/><circle cx="16" cy="16" r="12" fill="none" stroke="#9B72CB" stroke-width="4" stroke-dasharray="24 100" stroke-dashoffset="-50.2"/></svg>
       <b>argue</b><span>debate desk</span>
     </div>
     <div class="eyebrow">Plan usage</div>
@@ -262,7 +266,7 @@ details.round > .note:last-child { margin-bottom: 16px; }
       </label>
       <div class="field">Seats
         <div class="seats" id="seats"></div>
-        <button class="link-btn" id="add-seat" type="button">+ Connect another CLI</button>
+        <button class="link-btn" id="add-seat" type="button">⟳ Scan for CLIs</button>
       </div>
       <div class="row2">
         <label class="field">Max rounds
@@ -299,7 +303,7 @@ details.round > .note:last-child { margin-bottom: 16px; }
   var PALETTE = ["#3d5bd9", "#0c8599", "#2f7d4a", "#ae3ec9", "#c2255c", "#e8590c"];
   var THEMES = {
     claude: { name: "Claude", color: "#D97757", soft: "#fbeae2", glyph: "✻" },
-    codex: { name: "ChatGPT · Codex", color: "#10A37F", soft: "#e2f4ee", glyph: "✾" },
+    codex: { name: "ChatGPT · Codex", color: "#1f1f1f", soft: "#e9e8e6", knot: true, tile: "#141414" },
     antigravity: { name: "Gemini · Antigravity", color: "#7b6fd8", soft: "#ecebfb", glyph: "✦", gradient: ["#4285F4", "#9B72CB", "#D96570"] },
     gemini: { name: "Gemini CLI", color: "#7b6fd8", soft: "#ecebfb", glyph: "✦", gradient: ["#4285F4", "#9B72CB", "#D96570"] }
   };
@@ -363,12 +367,24 @@ details.round > .note:last-child { margin-bottom: 16px; }
   function themeVars(t) {
     return "--c:" + t.color + (t.gradient ? ";--g:linear-gradient(100deg," + t.gradient.join(",") + ")" : "");
   }
-  function mark(id) {
-    var t = themeFor(id);
+  // ChatGPT's mark: six rounded links turned 60 degrees apart (drawn, not a font glyph).
+  function knot(color) {
+    var g = svg("g", {});
+    for (var k = 0; k < 6; k++) {
+      g.appendChild(svg("rect", { x: 9.1, y: 2.6, width: 5.8, height: 12, rx: 2.9, fill: "none", stroke: color, "stroke-width": 1.7,
+        transform: "rotate(" + (k * 60) + " 12 12)" }));
+    }
+    return g;
+  }
+  function markTheme(t) {
+    if (t.knot) {
+      return h("span", { class: "mark", style: "background:" + t.tile }, svg("svg", { viewBox: "0 0 24 24", width: 14, height: 14 }, knot("#fff")));
+    }
     var style = t.gradient ? "background:linear-gradient(135deg," + t.gradient.join(",") + ");color:#fff"
       : "background:" + t.soft + ";color:" + t.color;
     return h("span", { class: "mark", style: style, text: t.glyph });
   }
+  function mark(id) { return markTheme(themeFor(id)); }
   function agentModel(id) {
     var a = agentInfo(id);
     return a ? a.provider + " · " + a.model : "";
@@ -388,26 +404,93 @@ details.round > .note:last-child { margin-bottom: 16px; }
   }
 
   // ---------- config + seats ----------
+  function storeGet(key) { try { return JSON.parse(localStorage.getItem(key) || "null"); } catch (e) { return null; } }
+  function storeSet(key, v) { try { localStorage.setItem(key, JSON.stringify(v)); } catch (e) { /* private mode: not remembered */ } }
+
+  // Asks each installed CLI for its model catalog (agy models, codex debug models): no prompts, no tokens.
+  function scanClis() {
+    if (state.scanning) return state.scanning;
+    state.scanning = api("/api/clis?list=1").then(function (data) {
+      state.clis = {};
+      data.clis.forEach(function (c) { state.clis[c.cliType] = c; });
+      state.clisList = data.clis;
+      renderSeats();
+      return data;
+    });
+    state.scanning.then(function () { state.scanning = null; }, function () { state.scanning = null; });
+    return state.scanning;
+  }
+  function modelOptionsFor(a) {
+    var cli = state.clis && state.clis[a.cliType];
+    var models = [a.model].concat(cli ? cli.models : []);
+    return models.filter(function (m, i) { return m && models.indexOf(m) === i; });
+  }
+  function effortOptionsFor(a, model) {
+    var cli = state.clis && state.clis[a.cliType];
+    if (!cli) return [];
+    var byModel = cli.effortsByModel && cli.effortsByModel[model];
+    return byModel && byModel.length ? byModel : (cli.efforts || []);
+  }
+
   function loadConfig() {
     return api("/api/config").then(function (cfg) {
-      var prevChecked = {};
-      [].forEach.call(document.querySelectorAll("#seats input"), function (c) { prevChecked[c.value] = c.checked; });
       state.config = cfg;
-      var box = document.getElementById("seats");
-      box.textContent = "";
-      cfg.agents.forEach(function (a) {
-        var cb = h("input", { type: "checkbox", value: a.id });
-        cb.checked = a.id in prevChecked ? prevChecked[a.id] : cfg.defaults.agents.indexOf(a.id) >= 0;
-        box.appendChild(h("label", { class: "seat-opt" }, cb, mark(a.id), a.id, h("small", { text: a.model }),
-          h("button", { class: "rm", type: "button", title: "Remove this seat", "aria-label": "Remove seat " + a.id,
-            onclick: function (ev) { ev.preventDefault(); removeSeat(a.id); } }, "×")));
-      });
+      renderSeats();
       var rounds = document.getElementById("rounds");
       if (cfg.defaults.maxRounds >= 1 && cfg.defaults.maxRounds <= 5 && !state.roundsTouched) rounds.value = String(cfg.defaults.maxRounds);
       var th = document.getElementById("threshold");
       var match = [].slice.call(th.options).filter(function (o) { return Number(o.value) === cfg.defaults.threshold; })[0];
       if (match && !state.thresholdTouched) th.value = match.value;
     }).catch(function (e) { showFormError("Could not load config: " + e.message); });
+  }
+
+  // One row per seat: tick it to take part, and pick its model and effort for this debate.
+  function renderSeats() {
+    var cfg = state.config; if (!cfg) return;
+    var prevChecked = {};
+    [].forEach.call(document.querySelectorAll("#seats input[type=checkbox]"), function (c) { prevChecked[c.value] = c.checked; });
+    var box = document.getElementById("seats");
+    box.textContent = "";
+    state.pickers = {};
+    if (!cfg.agents.length) {
+      box.appendChild(h("p", { class: "hint", text: "No seats yet. Click Scan for CLIs to find the AI tools installed on this computer." }));
+      return;
+    }
+    cfg.agents.forEach(function (a) {
+      var saved = storeGet("argue.seat." + a.id) || {};
+      var cli = state.clis && state.clis[a.cliType];
+      var cb = h("input", { type: "checkbox", value: a.id });
+      cb.checked = a.id in prevChecked ? prevChecked[a.id] : cfg.defaults.agents.indexOf(a.id) >= 0;
+      var models = modelOptionsFor(a);
+      var modelSel = h("select", { class: "pick", "aria-label": "Model for " + a.id });
+      models.forEach(function (m) {
+        var note = cli && cli.modelNotes && cli.modelNotes[m];
+        modelSel.appendChild(h("option", { value: m, text: m + (note ? " (" + note + ")" : "") }));
+      });
+      if (saved.model && models.indexOf(saved.model) >= 0) modelSel.value = saved.model;
+      var effortSel = h("select", { class: "pick", "aria-label": "Effort for " + a.id });
+      function fillEfforts() {
+        var opts = effortOptionsFor(a, modelSel.value);
+        var keep = effortSel.value || saved.effort || "";
+        effortSel.textContent = "";
+        effortSel.appendChild(h("option", { value: "", text: "effort: default" }));
+        opts.forEach(function (e) { effortSel.appendChild(h("option", { value: e, text: "effort: " + e })); });
+        effortSel.value = opts.indexOf(keep) >= 0 ? keep : "";
+        effortSel.style.display = opts.length ? "" : "none";
+      }
+      fillEfforts();
+      function remember() { storeSet("argue.seat." + a.id, { model: modelSel.value, effort: effortSel.value }); }
+      modelSel.addEventListener("change", function () { fillEfforts(); remember(); });
+      effortSel.addEventListener("change", remember);
+      state.pickers[a.id] = { model: modelSel, effort: effortSel };
+      var pickers = h("div", { class: "seat-pick" }, modelSel, effortSel);
+      if (a.cliType === "antigravity") pickers.title = "Antigravity models carry their effort in the name (low / medium / high).";
+      box.appendChild(h("div", { class: "seat-opt" },
+        h("label", { class: "seat-main" }, cb, mark(a.id), h("span", { text: a.id })),
+        h("button", { class: "rm", type: "button", title: "Remove this seat", "aria-label": "Remove seat " + a.id,
+          onclick: function (ev) { ev.preventDefault(); removeSeat(a.id); } }, "×"),
+        pickers));
+    });
   }
   document.getElementById("rounds").addEventListener("change", function () { state.roundsTouched = true; });
   document.getElementById("threshold").addEventListener("change", function () { state.thresholdTouched = true; });
@@ -426,10 +509,15 @@ details.round > .note:last-child { margin-bottom: 16px; }
     var task = document.getElementById("task").value.trim();
     if (!task) return showFormError("Write a task for the debate first.");
     if (agents.length < 2) return showFormError("Pick at least two seats.");
+    var settings = {};
+    agents.forEach(function (id) {
+      var p = state.pickers[id];
+      if (p) settings[id] = { model: p.model.value, effort: p.effort.style.display === "none" ? "" : p.effort.value };
+    });
     showFormError("");
     btn.disabled = true; btn.textContent = "Starting…";
     api("/api/runs", { method: "POST", body: {
-      task: task, agents: agents,
+      task: task, agents: agents, settings: settings,
       maxRounds: Number(document.getElementById("rounds").value),
       threshold: Number(document.getElementById("threshold").value)
     } }).then(function (res) {
@@ -439,9 +527,19 @@ details.round > .note:last-child { margin-bottom: 16px; }
       .then(function () { btn.disabled = false; btn.textContent = "Start debate"; });
   });
 
-  // ---------- connect another CLI ----------
-  document.getElementById("add-seat").addEventListener("click", openAddSeat);
-  function openAddSeat() {
+  // ---------- scan for CLIs / connect one ----------
+  function seatNameFor(cliType) {
+    var base = cliType === "text" ? "custom" : cliType === "codex" ? "chatgpt" : cliType === "antigravity" ? "gemini" : cliType;
+    var taken = state.config.agents.map(function (a) { return a.id; });
+    var name = base; var n = 2;
+    while (taken.indexOf(name) >= 0) name = base + "-" + n++;
+    return name;
+  }
+  function addSeat(body) {
+    return api("/api/seats", { method: "POST", body: body }).then(function () { return loadConfig().then(loadUsage); });
+  }
+  document.getElementById("add-seat").addEventListener("click", openScan);
+  function openScan() {
     var chosen = null;
     var nameInput = h("input", { type: "text", placeholder: "e.g. claude-sonnet" });
     var modelInput = h("input", { type: "text", list: "model-options", placeholder: "model id" });
@@ -452,58 +550,65 @@ details.round > .note:last-child { margin-bottom: 16px; }
       h("label", { class: "field" }, "Command", cmdInput),
       h("label", { class: "field" }, "Flags (space-separated)", argsInput,
         h("span", { class: "hint", text: "argue sends the prompt on stdin. Use {providerModel} for the model, or {prompt} if the CLI only takes the prompt as an argument." })));
+    var form = h("div", { style: "display:none;gap:12px" },
+      h("label", { class: "field" }, "Seat name", nameInput),
+      h("label", { class: "field" }, "Model", modelInput, modelList),
+      custom);
     var err = h("p", { class: "err", hidden: true });
-    var list = h("div", { class: "cli-list" }, h("p", { class: "waiting" }, h("span", { class: "dot" }), "Looking for installed CLIs… (asks each CLI for its model list; no prompts, no tokens)"));
+    var list = h("div", { class: "cli-list" }, h("p", { class: "waiting" }, h("span", { class: "dot" }), "Scanning this computer for AI CLIs… (asks each one for its model list: no prompts, no tokens)"));
     var save = h("button", { class: "btn", disabled: true }, "Add seat");
+    var rescan = h("button", { class: "btn ghost small", type: "button" }, "Scan again");
     var scrim = h("div", { class: "scrim", onclick: function (ev) { if (ev.target === scrim) close(); } },
-      h("div", { class: "card modal", role: "dialog", "aria-modal": "true", "aria-label": "Connect another CLI" },
-        h("h2", { text: "Connect another CLI" }),
-        h("p", { class: "hint", text: "Any agent CLI on this computer can take a seat. Pick one, choose its model and give the seat a name." }),
-        list,
-        h("div", { style: "display:grid;gap:12px" },
-          h("label", { class: "field" }, "Seat name", nameInput),
-          h("label", { class: "field" }, "Model", modelInput, modelList),
-          custom),
-        err,
-        h("div", { class: "actions" }, h("button", { class: "btn ghost", onclick: close }, "Cancel"), save)));
+      h("div", { class: "card modal", role: "dialog", "aria-modal": "true", "aria-label": "Scan for CLIs" },
+        h("div", { class: "section-head" }, h("h2", { text: "AI CLIs on this computer", style: "margin:0 auto 0 0" }), rescan),
+        h("p", { class: "hint", text: "Every agent CLI found here can take a seat. Add one in a click, or select it to choose the model and name yourself." }),
+        list, form, err,
+        h("div", { class: "actions" }, h("button", { class: "btn ghost", onclick: close }, "Close"), save)));
     document.body.appendChild(scrim);
-    function close() { scrim.remove(); }
-    function onKey(ev) { if (ev.key === "Escape") { close(); document.removeEventListener("keydown", onKey); } }
+    function close() { scrim.remove(); document.removeEventListener("keydown", onKey); }
+    function onKey(ev) { if (ev.key === "Escape") close(); }
     document.addEventListener("keydown", onKey);
 
     function pick(cli, btn) {
       chosen = cli;
       [].forEach.call(list.querySelectorAll(".cli-opt"), function (b) { b.classList.remove("sel"); });
       btn.classList.add("sel");
+      form.style.display = "grid";
       custom.style.display = cli.cliType === "text" ? "grid" : "none";
       modelList.textContent = "";
       (cli.models || []).forEach(function (m) { modelList.appendChild(h("option", { value: m })); });
       modelInput.value = (cli.models && cli.models[0]) || "";
       modelInput.placeholder = cli.modelHint || "model id";
-      if (!nameInput.value || nameInput.dataset.auto) {
-        var base = cli.cliType === "text" ? "custom" : cli.cliType === "codex" ? "chatgpt" : cli.cliType === "antigravity" ? "gemini" : cli.cliType;
-        var taken = state.config.agents.map(function (a) { return a.id; });
-        var name = base; var n = 2;
-        while (taken.indexOf(name) >= 0) name = base + "-" + n++;
-        nameInput.value = name; nameInput.dataset.auto = "1";
-      }
+      if (!nameInput.value || nameInput.dataset.auto) { nameInput.value = seatNameFor(cli.cliType); nameInput.dataset.auto = "1"; }
       save.disabled = false;
     }
     nameInput.addEventListener("input", function () { delete nameInput.dataset.auto; });
 
-    api("/api/clis?list=1").then(function (data) {
+    function draw(data) {
       list.textContent = "";
       var installed = data.clis.filter(function (c) { return c.installed; });
+      if (!installed.length) list.appendChild(h("p", { class: "hint", text: "No known AI CLIs found. Install one below, or use Other CLI for any command-line AI." }));
       installed.forEach(function (cli) {
         var t = THEMES[cli.cliType] || { glyph: cli.label[0], color: "#555", soft: "#eee" };
-        var b = h("button", { class: "cli-opt", type: "button" },
-          h("span", { class: "mark", style: t.gradient ? "background:linear-gradient(135deg," + t.gradient.join(",") + ");color:#fff" : "background:" + t.soft + ";color:" + t.color, text: t.glyph }),
-          h("span", null, cli.label, h("small", { text: (cli.models.length ? cli.models.length + " models · " : "") + cli.path })),
-          cli.note ? h("span", { class: "pill revise pick", title: cli.note, text: "note" }) : null);
+        var seated = state.config.agents.filter(function (a) { return a.cliType === cli.cliType; }).map(function (a) { return a.id; });
+        var quick = h("button", { class: "btn small pick", type: "button" }, seated.length ? "Add another" : "Add");
+        quick.addEventListener("click", function (ev) {
+          ev.stopPropagation();
+          quick.disabled = true; quick.textContent = "Adding…";
+          var body = { id: seatNameFor(cli.cliType), cliType: cli.cliType, model: (cli.models && cli.models[0]) || "default" };
+          if (cli.path) body.command = cli.path;
+          addSeat(body).then(function () { draw(state.lastScan); }).catch(function (e) { err.hidden = false; err.textContent = e.message; quick.disabled = false; quick.textContent = "Add"; });
+        });
+        var b = h("div", { class: "cli-opt", role: "button", tabindex: "0" },
+          markTheme(t),
+          h("span", { style: "min-width:0" }, cli.label,
+            h("small", { text: (cli.models.length ? cli.models.length + " models" : "models: " + (cli.modelHint || "type one in")) + (seated.length ? " · seated as " + seated.join(", ") : "") })),
+          cli.note ? h("span", { class: "pill revise", title: cli.note, text: "note" }) : null,
+          quick);
         b.addEventListener("click", function () { pick(cli, b); });
         list.appendChild(b);
       });
-      var other = h("button", { class: "cli-opt", type: "button" }, h("span", { class: "mark", style: "background:var(--soft)", text: "+" }),
+      var other = h("div", { class: "cli-opt", role: "button", tabindex: "0" }, h("span", { class: "mark", style: "background:var(--soft)", text: "+" }),
         h("span", null, "Other CLI", h("small", { text: "Any command that reads a prompt and prints an answer" })));
       other.addEventListener("click", function () { pick({ cliType: "text", models: [] }, other); });
       list.appendChild(other);
@@ -513,7 +618,13 @@ details.round > .note:last-child { margin-bottom: 16px; }
         missing.forEach(function (c) { d.appendChild(h("p", { class: "hint", style: "margin-top:6px" }, h("b", { text: c.label + ": " }), c.install)); });
         list.appendChild(d);
       }
-    }).catch(function (e) { list.textContent = ""; list.appendChild(h("p", { class: "err", text: e.message })); });
+    }
+    function run() {
+      scanClis().then(function (data) { state.lastScan = data; draw(data); })
+        .catch(function (e) { list.textContent = ""; list.appendChild(h("p", { class: "err", text: e.message })); });
+    }
+    rescan.addEventListener("click", run);
+    run();
 
     save.addEventListener("click", function () {
       if (!chosen) return;
@@ -525,10 +636,7 @@ details.round > .note:last-child { margin-bottom: 16px; }
         body.args = argsInput.value.trim() ? argsInput.value.trim().split(/\s+/) : [];
       }
       save.disabled = true;
-      api("/api/seats", { method: "POST", body: body }).then(function () {
-        close();
-        return loadConfig().then(loadUsage);
-      }).catch(function (e) { err.hidden = false; err.textContent = e.message; save.disabled = false; });
+      addSeat(body).then(close).catch(function (e) { err.hidden = false; err.textContent = e.message; save.disabled = false; });
     });
   }
 
@@ -896,9 +1004,14 @@ details.round > .note:last-child { margin-bottom: 16px; }
     var fill = svg("circle", { class: "fill", cx: 30, cy: 30, r: R, stroke: stroke, "stroke-dasharray": C, "stroke-dashoffset": C, transform: "rotate(-90 30 30)" });
     var orbit = svg("circle", { class: "orbit", cx: 30, cy: 30, r: R, stroke: stroke, "stroke-dasharray": "10 " + (C - 10), opacity: ".9" });
     orbit.style.display = "none";
-    var glyph = svg("text", { x: 30, y: 31, "text-anchor": "middle", "dominant-baseline": "middle", class: "glyph",
-      fill: t.gradient ? "url(#" + gid + ")" : t.color });
-    glyph.textContent = t.glyph;
+    var glyph;
+    if (t.knot) {
+      glyph = svg("g", { transform: "translate(18.6 18.6) scale(.95)" }, knot(t.color));
+    } else {
+      glyph = svg("text", { x: 30, y: 31, "text-anchor": "middle", "dominant-baseline": "middle", class: "glyph",
+        fill: t.gradient ? "url(#" + gid + ")" : t.color });
+      glyph.textContent = t.glyph;
+    }
     var num = h("span", { class: "num" });
     var who = h("span", { class: "who" });
     var tip = h("div", { class: "tip" });
@@ -945,6 +1058,8 @@ details.round > .note:last-child { margin-bottom: 16px; }
     return api("/api/usage").then(function (data) {
       var box = document.getElementById("usage");
       var seen = {};
+      var hint = box.querySelector("p.hint");
+      if (hint && data.seats.length) hint.remove();
       data.seats.forEach(function (seat) {
         seen[seat.cliType] = 1;
         if (!pods[seat.cliType]) { pods[seat.cliType] = buildPod(seat); }
@@ -985,7 +1100,7 @@ details.round > .note:last-child { margin-bottom: 16px; }
     document.getElementById("main").textContent = "Missing access token. Open the desk from its shortcut or the link printed by argue ui.";
     return;
   }
-  loadConfig().then(function () { loadUsage(); return refreshRuns(); }).then(function () { if (state.runs[0]) select(state.runs[0].requestId); });
+  loadConfig().then(function () { loadUsage(); scanClis().catch(function () {}); return refreshRuns(); }).then(function () { if (state.runs[0]) select(state.runs[0].requestId); });
   setInterval(function () { if (!state.closed) refreshRuns(); }, 5000);
   setInterval(loadUsage, 30000);
 })();
