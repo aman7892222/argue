@@ -67,6 +67,16 @@ argue config add-provider --id mycli --type cli --cli-type text --command mycli 
 
 On Windows, npm-installed CLIs (`.cmd` shims) are launched directly; no extra setup is needed.
 
+### Debate desk (web UI)
+
+```bash
+argue ui
+```
+
+This opens a local page in your browser. From there you can start a debate (task, seats, rounds, consensus threshold) and watch it round by round as each agent answers. For every seat you see the claims it proposed, its stance on each peer claim (agree, disagree or revise) with its confidence, rationale and proposed rewording, plus merges, final votes with reasons, the verdict, claim tallies and peer scores. Debates started from the terminal or from another session show up too, live.
+
+The page is served only on `127.0.0.1`, and its API requires a token that is created fresh each time the UI starts and is included in the printed link. Use `--port <n>` for a fixed port and `--no-open` to print the link instead of opening a browser. The UI shows each agent's final answer and stated reasoning, not its hidden chain of thought: agent CLIs do not expose that.
+
 ### Run a Debate
 
 ```bash

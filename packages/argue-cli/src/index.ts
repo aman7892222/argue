@@ -26,7 +26,8 @@ import { loadRunInput } from "./run-input.js";
 import { defaultOutputDirTemplate, resolveRunPlan } from "./run-plan.js";
 import { createTaskDelegate } from "./runtime/delegate.js";
 import { createSpinner } from "./spinner.js";
-import { MAX_ENCODED_BYTES, openReportInViewer, resolveLatestRequestId } from "./view.js";
+import { startUiServer } from "./ui/server.js";
+import { launchBrowser, MAX_ENCODED_BYTES, openReportInViewer, resolveLatestRequestId } from "./view.js";
 import { VENDOR_PRESETS, getVendorNames } from "./vendors.js";
 export type { CliSdkProviderAdapter, CreateCliSdkProviderAdapter, ProviderTaskRunnerArgs } from "./runtime/types.js";
 
@@ -134,8 +135,61 @@ export async function runCli(argv: string[], io: Pick<typeof console, "log" | "e
     return runModels(rest, io);
   }
 
+  if (command === "ui") {
+    return runUi(rest, io);
+  }
+
   io.error(`Unknown command: ${command}`);
   printHelp(io);
+  return { ok: false, code: 1 };
+}
+
+async function runUi(args: string[], io: Pick<typeof console, "log" | "error">): Promise<CliResult> {
+  let configPath: string | undefined;
+  let port: number | undefined;
+  let open = true;
+  for (let i = 0; i < args.length; i++) {
+    const arg = args[i];
+    if (arg === "--config" || arg === "-c") {
+      configPath = args[++i];
+      if (!configPath) return usageError(io, "--config requires a path");
+    } else if (arg === "--port") {
+      port = Number(args[++i]);
+      if (!Number.isInteger(port) || port < 0 || port > 65535) return usageError(io, "--port must be 0-65535");
+    } else if (arg === "--no-open") {
+      open = false;
+    } else {
+      return usageError(io, `Unknown option for ui: ${arg}`);
+    }
+  }
+
+  try {
+    // Fail fast on a missing/invalid config rather than serving a broken page.
+    const loaded = await loadCliConfig({ explicitPath: configPath });
+    const server = await startUiServer({ configPath: loaded.configPath, ...(port !== undefined ? { port } : {}) });
+    io.log(`[argue] debate desk running at ${server.url}`);
+    io.log(`  config: ${loaded.configPath}`);
+    io.log("  only reachable from this computer; press Ctrl+C to stop");
+    if (open) await launchBrowser(server.url);
+
+    await new Promise<void>((resolve) => {
+      const stop = (): void => {
+        process.off("SIGINT", stop);
+        process.off("SIGTERM", stop);
+        void server.close().then(resolve);
+      };
+      process.on("SIGINT", stop);
+      process.on("SIGTERM", stop);
+    });
+    return { ok: true, code: 0 };
+  } catch (error) {
+    io.error(String(error));
+    return { ok: false, code: 1 };
+  }
+}
+
+function usageError(io: Pick<typeof console, "error">, message: string): CliResult {
+  io.error(message);
   return { ok: false, code: 1 };
 }
 
@@ -1476,6 +1530,7 @@ function printHelp(io: Pick<typeof console, "log">): void {
   io.log(
     "  argue act --result <path> --task <prompt> [--agent <id>] [--config <path>] [--no-action-full-result] [--no-color]"
   );
+  io.log("  argue ui [--config <path>] [--port <n>] [--no-open]  # local web UI: start debates, watch them live");
   io.log("  argue models [--json] [--no-list] # find installed agent CLIs, their models, and add commands");
   io.log("  argue config init                # create empty config file");
   io.log("  argue config add-provider ...    # append provider to config");
