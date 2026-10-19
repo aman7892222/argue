@@ -8,6 +8,7 @@ import {
   findOnPath,
   formatDetectedClis,
   KNOWN_CLIS,
+  parseCodexModelCatalog,
   parseTabularModels,
   type KnownCli
 } from "../src/cli-catalog.js";
@@ -25,6 +26,21 @@ describe("parseTabularModels", () => {
     ].join("\r\n");
 
     expect(parseTabularModels(stdout)).toEqual(["gemini-4-argon-high", "claude-opus-5-5-low"]);
+  });
+});
+
+describe("parseCodexModelCatalog", () => {
+  it("keeps picker-visible slugs and tolerates bad input", () => {
+    const stdout = JSON.stringify({
+      models: [
+        { slug: "gpt-6-astra", visibility: "list" },
+        { slug: "internal-review", visibility: "hide" },
+        { slug: "gpt-5.6-sol", visibility: "list" },
+        { display_name: "no slug" }
+      ]
+    });
+    expect(parseCodexModelCatalog(stdout)).toEqual(["gpt-6-astra", "gpt-5.6-sol"]);
+    expect(parseCodexModelCatalog("not json")).toEqual([]);
   });
 });
 

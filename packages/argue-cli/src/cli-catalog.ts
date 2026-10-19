@@ -32,6 +32,8 @@ export const KNOWN_CLIS: KnownCli[] = [
     cliType: "codex",
     command: "codex",
     label: "OpenAI Codex",
+    listModelsArgs: ["debug", "models"],
+    parseModels: parseCodexModelCatalog,
     modelHint: "run `codex` and use /model to see ids available on your plan",
     install: "npm install -g @openai/codex@latest, then `codex login`"
   },
@@ -81,6 +83,22 @@ export function parseTabularModels(stdout: string): string[] {
     ids.push(first);
   }
   return [...new Set(ids)];
+}
+
+/** Parses `codex debug models` JSON, keeping only models Codex shows in its picker. */
+export function parseCodexModelCatalog(stdout: string): string[] {
+  let parsed: unknown;
+  try {
+    parsed = JSON.parse(stdout);
+  } catch {
+    return [];
+  }
+  const list = Array.isArray(parsed) ? parsed : (parsed as { models?: unknown })?.models;
+  if (!Array.isArray(list)) return [];
+  return list
+    .filter((m): m is { slug: string; visibility?: unknown } => typeof m?.slug === "string")
+    .filter((m) => m.visibility === undefined || m.visibility === "list")
+    .map((m) => m.slug);
 }
 
 /** Resolves a command on PATH (honouring PATHEXT on Windows); returns its full path or null. */
