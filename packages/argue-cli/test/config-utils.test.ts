@@ -1,6 +1,6 @@
 import { mkdir, mkdtemp, writeFile } from "node:fs/promises";
 import { tmpdir } from "node:os";
-import { join } from "node:path";
+import { join, resolve } from "node:path";
 import { describe, expect, it } from "vitest";
 import {
   createExampleConfigPath,
@@ -41,8 +41,8 @@ describe("config utilities", () => {
   });
 
   it("resolves relative paths and requestId placeholders", () => {
-    expect(resolvePath("./out/a.json", "/tmp/proj")).toBe("/tmp/proj/out/a.json");
-    expect(resolveOutputPath("./out/{requestId}.json", "/tmp/proj", "abc")).toBe("/tmp/proj/out/abc.json");
-    expect(createExampleConfigPath("/home/me")).toBe("/home/me/.config/argue/config.json");
+    expect(resolvePath("./out/a.json", "/tmp/proj")).toBe(resolve("/tmp/proj/out/a.json"));
+    expect(resolveOutputPath("./out/{requestId}.json", "/tmp/proj", "abc")).toBe(resolve("/tmp/proj/out/abc.json"));
+    expect(createExampleConfigPath("/home/me")).toBe(join("/home/me", ".config", "argue", "config.json"));
   });
 });

@@ -28,10 +28,30 @@ export const ApiProviderSchema = z
   })
   .strict();
 
+export const CLI_TYPES = [
+  "codex",
+  "claude",
+  "copilot",
+  "gemini",
+  "antigravity",
+  "pi",
+  "opencode",
+  "droid",
+  "amp",
+  "generic"
+] as const;
+
+export type CliType = (typeof CLI_TYPES)[number];
+
+/** Binary to launch when a cli provider does not set `command`. */
+export function defaultCliCommand(cliType: CliType): string {
+  return cliType === "antigravity" ? "agy" : cliType;
+}
+
 export const CliProviderSchema = z
   .object({
     type: z.literal("cli"),
-    cliType: z.enum(["codex", "claude", "copilot", "gemini", "pi", "opencode", "droid", "amp", "generic"]),
+    cliType: z.enum(CLI_TYPES),
     command: z.string().min(1).optional(),
     args: z.array(z.string()).default([]),
     env: z.record(z.string()).optional(),

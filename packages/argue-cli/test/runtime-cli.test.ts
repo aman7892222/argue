@@ -546,6 +546,47 @@ process.stdout.write(JSON.stringify(output));
     expect(stdin).toBe("");
   });
 
+  it("builds antigravity stream-json args and wraps the prompt as a user event", async () => {
+    const script = await createAntigravityScript("argue-cli-runner-agy-", "SUCCESS");
+
+    const runner = createCliRunner({
+      type: "cli",
+      cliType: "antigravity",
+      command: script,
+      args: [],
+      models: { fake: {} }
+    });
+
+    const result = await runner.runTask({ task: makeRoundTask(), agent });
+    const { argv, event } = JSON.parse(
+      (result as { kind: string; output: { fullResponse: string } }).output.fullResponse
+    ) as { argv: string[]; event: { event: string; message: { content: string } } };
+
+    expect(argv[argv.indexOf("--input-format") + 1]).toBe("stream-json");
+    expect(argv[argv.indexOf("--output-format") + 1]).toBe("stream-json");
+    expect(argv[argv.indexOf("--model") + 1]).toBe("fake");
+    expect(argv).not.toContain("--dangerously-skip-permissions");
+
+    expect(event.event).toBe("user");
+    expect(event.message.content).toContain("argue CLI host");
+  });
+
+  it("surfaces antigravity ERROR result events as failures", async () => {
+    const script = await createAntigravityScript("argue-cli-runner-agy-error-", "ERROR");
+
+    const runner = createCliRunner({
+      type: "cli",
+      cliType: "antigravity",
+      command: script,
+      args: [],
+      models: { fake: {} }
+    });
+
+    await expect(runner.runTask({ task: makeRoundTask(), agent })).rejects.toThrow(
+      /status=ERROR error=quota exhausted/
+    );
+  });
+
   it("parses fenced json output in codex mode", async () => {
     const root = await mkdtemp(join(tmpdir(), "argue-cli-runner-codex-"));
     const script = join(root, "runner.mjs");
@@ -617,6 +658,37 @@ process.stdout.write(JSON.stringify({
   extractedClaims: [],
   judgements: []
 }));
+`,
+    { mode: 0o755 }
+  );
+
+  return script;
+}
+
+async function createAntigravityScript(prefix: string, status: "SUCCESS" | "ERROR"): Promise<string> {
+  const root = await mkdtemp(join(tmpdir(), prefix));
+  const script = join(root, "agy.mjs");
+
+  await writeFile(
+    script,
+    `#!/usr/bin/env node
+import process from "node:process";
+let stdin = "";
+for await (const chunk of process.stdin) stdin += chunk;
+const event = JSON.parse(stdin.split("\\n")[0]);
+const response = JSON.stringify({
+  fullResponse: JSON.stringify({ argv: process.argv, event }),
+  summary: "ok",
+  taskTitle: "demo title",
+  extractedClaims: [],
+  judgements: []
+});
+process.stdout.write(JSON.stringify({ event: "init", session: "x" }) + "\\n");
+process.stdout.write("not json noise\\n");
+process.stdout.write(JSON.stringify({
+  event: "result",
+  result: ${status === "SUCCESS" ? '{ status: "SUCCESS", response }' : '{ status: "ERROR", error: "quota exhausted" }'}
+}) + "\\n");
 `,
     { mode: 0o755 }
   );

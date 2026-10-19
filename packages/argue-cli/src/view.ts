@@ -21,7 +21,11 @@ export async function listCompletedRuns(resolvedResultTemplate: string): Promise
 
   // The scan dir is the path prefix up to (but not including) the {requestId} segment.
   // We assume the default layout where {requestId} occupies a full path segment.
-  const prefixSlash = resolvedResultTemplate.lastIndexOf("/", tokenIdx - 1);
+  // Accept both separators: resolved paths on Windows use "\".
+  const prefixSlash = Math.max(
+    resolvedResultTemplate.lastIndexOf("/", tokenIdx - 1),
+    resolvedResultTemplate.lastIndexOf("\\", tokenIdx - 1)
+  );
   if (prefixSlash === -1) return [];
   const scanDir = resolvedResultTemplate.slice(0, prefixSlash);
 

@@ -4,8 +4,10 @@ import { ActionTaskResultSchema, ArgueResultSchema, type ActionTaskInput, type A
 import packageMetadata from "../package.json" with { type: "json" };
 import {
   AgentSchema,
+  CLI_TYPES,
   CliConfigSchema,
   createExampleConfigPath,
+  defaultCliCommand,
   DEFAULT_VIEWER_URL,
   loadCliConfig,
   loadRawCliConfig,
@@ -13,6 +15,7 @@ import {
   ProviderSchema,
   resolveConfigPath,
   resolveOutputPath,
+  type CliType,
   type LoadedCliConfig,
   type ResolveConfigPathOptions
 } from "./config.js";
@@ -68,7 +71,7 @@ type ConfigAddProviderOptions = {
   protocol?: "openai-compatible" | "anthropic-compatible";
   baseUrl?: string;
   apiKeyEnv?: string;
-  cliType?: "codex" | "claude" | "copilot" | "gemini" | "pi" | "opencode" | "droid" | "amp" | "generic";
+  cliType?: CliType;
   command?: string;
   args?: string[];
   adapter?: string;
@@ -1125,17 +1128,7 @@ function parseConfigAddProviderOptions(
 
     if (arg === "--cli-type") {
       const value = args[i + 1];
-      const validCliTypes = [
-        "codex",
-        "claude",
-        "copilot",
-        "gemini",
-        "pi",
-        "opencode",
-        "droid",
-        "amp",
-        "generic"
-      ] as const;
+      const validCliTypes = CLI_TYPES;
       if (!value || !validCliTypes.includes(value as (typeof validCliTypes)[number])) {
         return { ok: false, error: `--cli-type must be one of: ${validCliTypes.join(", ")}` };
       }
@@ -1211,11 +1204,11 @@ function parseConfigAddProviderOptions(
     if (!out.cliType) {
       return {
         ok: false,
-        error: "CLI provider requires --cli-type <codex|claude|copilot|gemini|pi|opencode|droid|amp|generic>."
+        error: `CLI provider requires --cli-type <${CLI_TYPES.join("|")}>.`
       };
     }
     if (!out.command) {
-      out.command = out.cliType;
+      out.command = defaultCliCommand(out.cliType);
     }
   }
 
@@ -1481,7 +1474,7 @@ function printHelp(io: Pick<typeof console, "log">): void {
     `    api options: --vendor <${getVendorNames().join("|")}> | --protocol <openai-compatible|anthropic-compatible> [--base-url <url>] [--api-key-env <ENV_VAR>]`
   );
   io.log(
-    "    cli options: --cli-type <codex|claude|copilot|gemini|pi|opencode|droid|amp|generic> [--command <binary>] [--args a,b,c]"
+    "    cli options: --cli-type <codex|claude|copilot|gemini|antigravity|pi|opencode|droid|amp|generic> [--command <binary>] [--args a,b,c]"
   );
   io.log("    sdk options: --adapter <module> [--export-name <name>]");
   io.log(

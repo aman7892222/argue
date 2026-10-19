@@ -1,5 +1,19 @@
 # Changelog
 
+## [Unreleased]
+
+Fork of [onevcat/argue](https://github.com/onevcat/argue) by aman7892222. Headline: argue runs natively on Windows and can seat Gemini through the Antigravity CLI.
+
+### Features
+
+- New `antigravity` cliType (default command `agy`): the prompt is sent as a stream-json `user` event on stdin, and the answer is read from the terminal `{"event":"result"}` line. No permission-bypass flag is passed. This replaces the Gemini CLI path, which no longer accepts Google AI Pro logins.
+
+### Fixes
+
+- CLI providers are spawned via `cross-spawn`, so npm `.cmd` shims (for example `codex.cmd`) and shebang scripts launch on Windows.
+- `argue view` now discovers previous runs when output paths use Windows `\` separators.
+- Tests are platform-aware. On Windows, `config init` tests no longer write into the real user profile, and the unwritable-path test no longer creates `C:\dev\null`.
+
 ## [0.6.1] - 2026-05-31
 
 ### Fixes

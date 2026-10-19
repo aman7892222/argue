@@ -140,14 +140,18 @@ describe("runCli command branches", () => {
   it("propagates execute failure in run path", async () => {
     const root = await mkdtemp(join(tmpdir(), "argue-cli-run-fail-exec-"));
     const configPath = join(root, "argue.config.json");
+    // A path nested under a regular file is unwritable on every platform
+    // ("/dev/null/..." is creatable on Windows, where it resolves to C:\dev\null).
+    const blocker = join(root, "blocker");
+    await writeFile(blocker, "");
 
     await writeFile(
       configPath,
       JSON.stringify({
         schemaVersion: 1,
         output: {
-          resultPath: "/dev/null/fail.result.json",
-          summaryPath: "/dev/null/fail.summary.md",
+          resultPath: join(blocker, "fail.result.json"),
+          summaryPath: join(blocker, "fail.summary.md"),
           jsonlPath: "./out/{requestId}.events.jsonl"
         },
         defaults: {

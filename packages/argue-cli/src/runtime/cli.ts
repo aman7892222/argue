@@ -1,8 +1,10 @@
 import { randomUUID } from "node:crypto";
-import { spawn } from "node:child_process";
 import { tmpdir } from "node:os";
 import { join } from "node:path";
-import type { CliProviderConfig } from "../config.js";
+// cross-spawn resolves Windows `.cmd` shims (npm-installed CLIs) and shebang scripts,
+// escaping args for cmd.exe; on other platforms it delegates to child_process.spawn.
+import spawn from "cross-spawn";
+import { defaultCliCommand, type CliProviderConfig } from "../config.js";
 import { buildTaskPrompt } from "./prompt.js";
 import { normalizeTaskOutput, normalizeTaskOutputFromText } from "./task-output.js";
 import type { ProviderTaskRunner } from "./types.js";
@@ -13,7 +15,7 @@ type BaseArgsResult = {
 };
 
 export function createCliRunner(raw: CliProviderConfig): ProviderTaskRunner {
-  const provider = { ...raw, command: raw.command ?? raw.cliType };
+  const provider = { ...raw, command: raw.command ?? defaultCliCommand(raw.cliType) };
   const sessionUUID = randomUUID();
   let callCount = 0;
   let warnedUnsupportedReasoning = false;
@@ -62,9 +64,13 @@ export function createCliRunner(raw: CliProviderConfig): ProviderTaskRunner {
               }
             : {})
         },
-        stdin: usesStdinPrompt(provider.cliType) ? prompt : "",
+        stdin: buildStdin(provider.cliType, prompt),
         abortSignal
       });
+
+      if (provider.cliType === "antigravity") {
+        return normalizeTaskOutputFromText(task, extractAntigravityResponse(result.stdout));
+      }
 
       if (provider.cliType === "generic") {
         try {
@@ -79,6 +85,44 @@ export function createCliRunner(raw: CliProviderConfig): ProviderTaskRunner {
   };
 }
 
+function buildStdin(cliType: CliProviderConfig["cliType"], prompt: string): string {
+  if (cliType === "antigravity") {
+    // agy headless stream-json input: one JSON event per line; the process exits when stdin closes.
+    return JSON.stringify({ event: "user", message: { content: prompt } }) + "\n";
+  }
+  return usesStdinPrompt(cliType) ? prompt : "";
+}
+
+/**
+ * Pulls the final answer out of agy `--output-format stream-json` output, where the
+ * terminal line is `{"event":"result","result":{"status":"SUCCESS"|"ERROR",...}}`.
+ */
+export function extractAntigravityResponse(stdout: string): string {
+  const lines = stdout.split(/\r?\n/).filter((line) => line.trim().length > 0);
+  for (let i = lines.length - 1; i >= 0; i--) {
+    let event: unknown;
+    try {
+      event = JSON.parse(lines[i]!);
+    } catch {
+      continue;
+    }
+    if (!event || typeof event !== "object" || (event as { event?: unknown }).event !== "result") continue;
+
+    const result = (event as { result?: { status?: unknown; response?: unknown; error?: unknown } }).result ?? {};
+    if (result.status !== "SUCCESS") {
+      throw new Error(
+        `antigravity CLI returned status=${String(result.status ?? "missing")} error=${String(result.error ?? "empty")}`
+      );
+    }
+    if (typeof result.response !== "string") {
+      throw new Error("antigravity CLI result event has no string response");
+    }
+    return result.response;
+  }
+
+  throw new Error(`antigravity CLI produced no result event. stdout=${stdout.trim() || "empty"}`);
+}
+
 /** Returns true if the CLI tool reads the prompt from stdin, false if it goes in args. */
 function usesStdinPrompt(cliType: CliProviderConfig["cliType"]): boolean {
   switch (cliType) {
@@ -86,6 +130,7 @@ function usesStdinPrompt(cliType: CliProviderConfig["cliType"]): boolean {
     case "codex":
     case "gemini":
     case "pi":
+    case "antigravity":
     case "generic":
       return true;
     case "copilot":
@@ -144,6 +189,13 @@ function buildBaseArgs(
       return { args: ["-p", prompt, "--yolo", "--model", providerModel], reasoningApplied: false };
     case "gemini":
       return { args: ["--approval-mode", "yolo", "-m", providerModel], reasoningApplied: false };
+    case "antigravity":
+      // No permission bypass: tools needing approval are soft-denied in headless mode,
+      // which is fine for debates.
+      return {
+        args: ["--input-format", "stream-json", "--output-format", "stream-json", "--model", providerModel],
+        reasoningApplied: false
+      };
     case "pi": {
       const sessionArgs = sessionUUID ? ["--session", join(tmpdir(), `argue-pi-${sessionUUID}`)] : [];
       return { args: ["--model", providerModel, ...sessionArgs], reasoningApplied: false };
@@ -230,17 +282,22 @@ async function runCommand(args: {
       stdio: "pipe",
       signal: args.abortSignal
     });
+    const { stdout: out, stderr: err, stdin: input } = child;
+    if (!out || !err || !input) {
+      reject(new Error("CLI provider spawned without stdio pipes"));
+      return;
+    }
 
     let stdout = "";
     let stderr = "";
 
-    child.stdout.setEncoding("utf8");
-    child.stderr.setEncoding("utf8");
+    out.setEncoding("utf8");
+    err.setEncoding("utf8");
 
-    child.stdout.on("data", (chunk: string) => {
+    out.on("data", (chunk: string) => {
       stdout += chunk;
     });
-    child.stderr.on("data", (chunk: string) => {
+    err.on("data", (chunk: string) => {
       stderr += chunk;
     });
 
@@ -261,6 +318,6 @@ async function runCommand(args: {
       );
     });
 
-    child.stdin.end(args.stdin);
+    input.end(args.stdin);
   });
 }

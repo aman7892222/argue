@@ -1,3 +1,4 @@
+import { resolve } from "node:path";
 import { describe, expect, it } from "vitest";
 import type { LoadedCliConfig } from "../src/config.js";
 import { resolveRunPlan } from "../src/run-plan.js";
@@ -84,9 +85,9 @@ describe("resolveRunPlan", () => {
       overrides: { requestId: "abc" }
     });
 
-    expect(plan.jsonlPath).toBe("/tmp/project/out/abc.events.jsonl");
-    expect(plan.resultPath).toBe("/tmp/project/out/abc.result.json");
-    expect(plan.summaryPath).toBe("/tmp/project/out/abc.summary.md");
+    expect(plan.jsonlPath).toBe(resolve("/tmp/project/out/abc.events.jsonl"));
+    expect(plan.resultPath).toBe(resolve("/tmp/project/out/abc.result.json"));
+    expect(plan.summaryPath).toBe(resolve("/tmp/project/out/abc.summary.md"));
   });
 
   it("keeps task as the only required input field", () => {

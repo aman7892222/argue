@@ -637,7 +637,10 @@ describe("cli config loader", () => {
     await mkdir(home, { recursive: true });
 
     const oldHome = process.env.HOME;
+    // os.homedir() reads USERPROFILE on Windows, HOME elsewhere.
+    const oldUserProfile = process.env.USERPROFILE;
     process.env.HOME = home;
+    process.env.USERPROFILE = home;
 
     try {
       const logs: string[] = [];
@@ -666,6 +669,11 @@ describe("cli config loader", () => {
         delete process.env.HOME;
       } else {
         process.env.HOME = oldHome;
+      }
+      if (oldUserProfile === undefined) {
+        delete process.env.USERPROFILE;
+      } else {
+        process.env.USERPROFILE = oldUserProfile;
       }
     }
   });
