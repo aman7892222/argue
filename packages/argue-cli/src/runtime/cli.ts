@@ -37,7 +37,8 @@ export function createCliRunner(raw: CliProviderConfig): ProviderTaskRunner {
         prompt,
         reasoning,
         hasSession ? sessionUUID : undefined,
-        isResume
+        isResume,
+        provider.args
       );
       // `text` CLIs that cannot read stdin take the prompt through a `{prompt}` arg instead.
       const promptInArgs = provider.cliType === "text" && provider.args.some((arg) => arg.includes("{prompt}"));
@@ -150,13 +151,22 @@ function usesStdinPrompt(cliType: CliProviderConfig["cliType"]): boolean {
   }
 }
 
+const CODEX_PERMISSION_FLAGS = new Set([
+  "-s",
+  "--sandbox",
+  "--approve-for-me",
+  "--full-auto",
+  "--dangerously-bypass-approvals-and-sandbox"
+]);
+
 function buildBaseArgs(
   cliType: CliProviderConfig["cliType"],
   providerModel: string,
   prompt: string,
   reasoning?: string,
   sessionUUID?: string,
-  isResume?: boolean
+  isResume?: boolean,
+  userArgs: string[] = []
 ): BaseArgsResult {
   switch (cliType) {
     case "claude": {
@@ -177,13 +187,18 @@ function buildBaseArgs(
     }
     case "codex": {
       const reasoningArgs = reasoning ? ["-c", `model_reasoning_effort=${reasoning}`] : [];
+      // Debates need no tool writes, so default to a read-only sandbox. If the user's args
+      // already choose a mode (e.g. --sandbox workspace-write for --action), defer to them.
+      const sandboxArgs = userArgs.some((arg) => CODEX_PERMISSION_FLAGS.has(arg.split("=")[0]!))
+        ? []
+        : ["--sandbox", "read-only"];
       return {
         args: [
           "exec",
           "-m",
           providerModel,
           ...reasoningArgs,
-          "--full-auto",
+          ...sandboxArgs,
           "--color",
           "never",
           "--skip-git-repo-check"

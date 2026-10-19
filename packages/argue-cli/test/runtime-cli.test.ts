@@ -278,18 +278,38 @@ process.stdout.write(JSON.stringify(output));
 
     const execIndex = argv.indexOf("exec");
     const modelFlagIndex = argv.indexOf("-m");
-    const fullAutoIndex = argv.indexOf("--full-auto");
     const colorIndex = argv.indexOf("--color");
     const sandboxIndex = argv.indexOf("--sandbox");
 
     expect(execIndex).toBeGreaterThan(0);
     expect(modelFlagIndex).toBeGreaterThan(execIndex);
     expect(argv[modelFlagIndex + 1]).toBe("fake");
-    expect(fullAutoIndex).toBeGreaterThan(modelFlagIndex);
-    expect(colorIndex).toBeGreaterThan(fullAutoIndex);
+    expect(colorIndex).toBeGreaterThan(modelFlagIndex);
     expect(argv[colorIndex + 1]).toBe("never");
+    // the user's --sandbox wins: no default read-only sandbox, so no duplicate flag
+    expect(argv.filter((arg) => arg === "--sandbox")).toHaveLength(1);
     expect(sandboxIndex).toBeGreaterThan(colorIndex);
     expect(argv[sandboxIndex + 1]).toBe("danger-full-access");
+    expect(argv).not.toContain("--full-auto");
+  });
+
+  it("defaults codex to a read-only sandbox without auto-approval", async () => {
+    const script = await createArgvEchoScript("argue-cli-runner-codex-default-sandbox-");
+
+    const runner = createCliRunner({
+      type: "cli",
+      cliType: "codex",
+      command: script,
+      args: [],
+      models: { fake: {} }
+    });
+
+    const result = await runner.runTask({ task: makeRoundTask(), agent });
+    const argv = getArgv(result as { kind: string; output: { fullResponse: string } });
+
+    expect(argv[argv.indexOf("--sandbox") + 1]).toBe("read-only");
+    expect(argv).not.toContain("--full-auto");
+    expect(argv).not.toContain("--approve-for-me");
   });
 
   it("passes reasoning to codex via model_reasoning_effort config override", async () => {

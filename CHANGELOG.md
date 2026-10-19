@@ -12,6 +12,7 @@ Fork of [onevcat/argue](https://github.com/onevcat/argue) by aman7892222. Headli
 
 ### Fixes
 
+- Codex seats work again with Codex CLI 0.163+, which removed `--full-auto` from `codex exec`. Codex now defaults to `--sandbox read-only`, since debates need no file writes. If a provider's `args` already pick a mode (`--sandbox`, `--approve-for-me`, …), argue leaves the default out, so `--action` runs can opt into write access.
 - CLI providers are spawned via `cross-spawn`, so npm `.cmd` shims (for example `codex.cmd`) and shebang scripts launch on Windows.
 - `argue view` now discovers previous runs when output paths use Windows `\` separators.
 - Tests are platform-aware. On Windows, `config init` tests no longer write into the real user profile, and the unwritable-path test no longer creates `C:\dev\null`.
