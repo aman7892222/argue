@@ -5,6 +5,7 @@ import { join } from "node:path";
 // escaping args for cmd.exe; on other platforms it delegates to child_process.spawn.
 import spawn from "cross-spawn";
 import { defaultCliCommand, type CliProviderConfig } from "../config.js";
+import { recordAntigravityTokens, recordClaudeRateLimit } from "../usage.js";
 import { buildTaskPrompt } from "./prompt.js";
 import { normalizeTaskOutput, normalizeTaskOutputFromText } from "./task-output.js";
 import type { ProviderTaskRunner } from "./types.js";
@@ -75,7 +76,15 @@ export function createCliRunner(raw: CliProviderConfig): ProviderTaskRunner {
       });
 
       if (provider.cliType === "antigravity") {
-        return normalizeTaskOutputFromText(task, extractAntigravityResponse(result.stdout));
+        const parsed = parseAntigravityResult(result.stdout);
+        await recordAntigravityTokens(parsed.totalTokens);
+        return normalizeTaskOutputFromText(task, parsed.response);
+      }
+
+      if (provider.cliType === "claude") {
+        const parsed = parseClaudeStream(result.stdout);
+        if (parsed.rateLimit) await recordClaudeRateLimit(parsed.rateLimit);
+        return normalizeTaskOutputFromText(task, parsed.response);
       }
 
       if (provider.cliType === "generic") {
@@ -104,6 +113,10 @@ function buildStdin(cliType: CliProviderConfig["cliType"], prompt: string): stri
  * terminal line is `{"event":"result","result":{"status":"SUCCESS"|"ERROR",...}}`.
  */
 export function extractAntigravityResponse(stdout: string): string {
+  return parseAntigravityResult(stdout).response;
+}
+
+export function parseAntigravityResult(stdout: string): { response: string; totalTokens: number } {
   const lines = stdout.split(/\r?\n/).filter((line) => line.trim().length > 0);
   for (let i = lines.length - 1; i >= 0; i--) {
     let event: unknown;
@@ -123,10 +136,41 @@ export function extractAntigravityResponse(stdout: string): string {
     if (typeof result.response !== "string") {
       throw new Error("antigravity CLI result event has no string response");
     }
-    return result.response;
+    const usage = (result as { usage?: { total_tokens?: unknown } }).usage;
+    return {
+      response: result.response,
+      totalTokens: typeof usage?.total_tokens === "number" ? usage.total_tokens : 0
+    };
   }
 
   throw new Error(`antigravity CLI produced no result event. stdout=${stdout.trim() || "empty"}`);
+}
+
+/**
+ * Reads `claude --output-format stream-json --verbose` output: the answer comes from the
+ * final `result` event, and `rate_limit_event` carries 5-hour / 7-day plan utilization.
+ * Output that is not stream-json (e.g. a wrapper script) is used as the answer verbatim.
+ */
+export function parseClaudeStream(stdout: string): { response: string; rateLimit: unknown } {
+  let response: string | null = null;
+  let rateLimit: unknown = null;
+  for (const line of stdout.split(/\r?\n/)) {
+    if (!line.startsWith("{")) continue;
+    let event: { type?: unknown; result?: unknown; is_error?: unknown; rate_limit_info?: unknown };
+    try {
+      event = JSON.parse(line) as typeof event;
+    } catch {
+      continue;
+    }
+    if (event.type === "rate_limit_event") rateLimit = event.rate_limit_info;
+    if (event.type === "result") {
+      if (event.is_error === true) {
+        throw new Error(`claude CLI returned an error result: ${String(event.result ?? "no details")}`);
+      }
+      if (typeof event.result === "string") response = event.result;
+    }
+  }
+  return { response: response ?? stdout, rateLimit };
 }
 
 /** Returns true if the CLI tool reads the prompt from stdin, false if it goes in args. */
@@ -170,13 +214,16 @@ function buildBaseArgs(
 ): BaseArgsResult {
   switch (cliType) {
     case "claude": {
+      // stream-json (which requires --verbose) also reports plan rate limits; see parseClaudeStream.
+      const output = ["--output-format", "stream-json", "--verbose"];
       const args =
         sessionUUID && isResume
-          ? ["--print", "--model", providerModel, "--resume", sessionUUID]
+          ? ["--print", "--model", providerModel, ...output, "--resume", sessionUUID]
           : [
               "--print",
               "--model",
               providerModel,
+              ...output,
               ...(sessionUUID ? ["--session-id", sessionUUID] : ["--no-session-persistence"])
             ];
 

@@ -128,6 +128,37 @@ describe("ui server", () => {
     expect((await call(server, "/api/runs/..%2Fescape")).status).toBe(400);
   });
 
+  it("reports usage per CLI kind with the agents that share it", async () => {
+    const { root } = await makeWorkspace();
+    const configPath = join(root, "cli.config.json");
+    await writeFile(
+      configPath,
+      JSON.stringify({
+        schemaVersion: 1,
+        providers: {
+          claude: { type: "cli", cliType: "claude", models: { opus: {} } },
+          agy: { type: "cli", cliType: "antigravity", models: { m: {} } },
+          mock: { type: "mock", models: { fake: {} } }
+        },
+        agents: [
+          { id: "c1", provider: "claude", model: "opus" },
+          { id: "c2", provider: "claude", model: "opus" },
+          { id: "g", provider: "agy", model: "m" },
+          { id: "x", provider: "mock", model: "fake" }
+        ]
+      })
+    );
+
+    server = await startUiServer({ configPath });
+    const usage = (await call(server, "/api/usage")).body as {
+      seats: Array<{ cliType: string; agents: string[]; usage: { kind: string } }>;
+    };
+    expect(usage.seats.map((s) => [s.cliType, s.agents, s.usage.kind])).toEqual([
+      ["claude", ["c1", "c2"], expect.stringMatching(/^(limits|unknown)$/)],
+      ["antigravity", ["g"], "tokens"]
+    ]);
+  });
+
   it("launches a run and reports it before any event exists", async () => {
     const { root, configPath } = await makeWorkspace();
     const fakeCli = join(root, "fake-cli.mjs");

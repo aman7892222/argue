@@ -75,6 +75,18 @@ argue ui
 
 This opens a local page in your browser. From there you can start a debate (task, seats, rounds, consensus threshold) and watch it round by round as each agent answers. For every seat you see the claims it proposed, its stance on each peer claim (agree, disagree or revise) with its confidence, rationale and proposed rewording, plus merges, final votes with reasons, the verdict, claim tallies and peer scores. Debates started from the terminal or from another session show up too, live.
 
+Results come first: the verdict, the claims with their tallies, and the peer scores. Below them, each round is folded into one line that shows which seats have answered and the stance totals; click it to see every seat's answer, claims, judgements and reasoning.
+
+**Usage rings** at the top of the sidebar show how much of each plan's limit is used, the way Claude Code shows its ring. Hover a ring to see each window and when it resets.
+
+| Seat        | Ring shows                                                | Where it comes from                                                                                                 |
+| ----------- | --------------------------------------------------------- | ------------------------------------------------------------------------------------------------------------------- |
+| Claude      | % of the 5-hour window used (hover for the 7-day window)  | the `rate_limit_event` that Claude Code reports on each call; argue saves the latest one to `~/.argue/usage.json`   |
+| Codex       | % of the 5-hour window used (hover for the weekly window) | the `rate_limits` that Codex writes to its own logs in `~/.codex/sessions`                                          |
+| Antigravity | tokens argue used today                                   | agy reports token counts but not its remaining quota. Its quota is also separate from the Gemini app's daily limit. |
+
+These limits are shared with your other use of each plan. The Claude ring updates whenever a debate calls Claude, and the Codex ring whenever Codex runs anywhere.
+
 The page is served only on `127.0.0.1`, and its API requires a token that is created fresh each time the UI starts and is included in the printed link. Use `--port <n>` for a fixed port and `--no-open` to print the link instead of opening a browser. The UI shows each agent's final answer and stated reasoning, not its hidden chain of thought: agent CLIs do not expose that.
 
 ### Run a Debate

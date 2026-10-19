@@ -82,10 +82,45 @@ details > summary::-webkit-details-marker { display: none; }
 details > summary::before { content: "▸ "; }
 details[open] > summary::before { content: "▾ "; }
 .prose { white-space: pre-wrap; margin: 10px 0 0; }
-.round { margin-bottom: 18px; }
-.round-head { display: flex; align-items: baseline; gap: 10px; margin: 0 0 10px; }
-.round-head b { font-size: 16px; }
-.round-head span { color: var(--muted); font-size: 13px; }
+.section-head { display: flex; align-items: center; gap: 8px; margin-bottom: 12px; }
+.section-head h3 { margin: 0 auto 0 0; font-size: 13px; text-transform: uppercase; letter-spacing: .06em; color: var(--muted); font-weight: 700; }
+.btn.small { padding: 4px 10px; font-size: 12.5px; }
+details.round { margin-bottom: 10px; padding: 0; }
+details.round > summary { color: var(--ink); font-weight: 400; font-size: 14px; padding: 12px 16px; display: flex; flex-wrap: wrap;
+  align-items: center; gap: 8px 14px; border-radius: 12px; }
+details.round > summary::before { content: "▸"; color: var(--muted); font-size: 12px; }
+details.round[open] > summary::before { content: "▾"; }
+details.round > summary:hover { background: #fbfaf6; }
+details.round[open] > summary { border-bottom: 1px solid var(--line); border-radius: 12px 12px 0 0; }
+details.round > .lanes, details.round > .note { margin: 12px 14px; }
+details.round > .note:last-child { margin-bottom: 14px; }
+.round-title { display: flex; align-items: baseline; gap: 10px; flex-wrap: wrap; }
+.round-title b { font-size: 15px; }
+.round-title span { color: var(--muted); font-size: 13px; }
+.round-meta { display: flex; align-items: center; gap: 6px; flex-wrap: wrap; margin-left: auto; }
+.seat-chip { display: inline-flex; align-items: center; gap: 5px; font-size: 12px; font-weight: 600; padding: 2px 8px 2px 4px;
+  border-radius: 999px; background: var(--soft); color: var(--ink); }
+.seat-chip i { width: 9px; height: 9px; border-radius: 50%; background: var(--c); display: inline-block; }
+.seat-chip.done { color: var(--agree); }
+.seat-chip.dropped { color: var(--disagree); }
+.seat-chip.thinking { color: var(--accent); }
+.seat-chip .dot { width: 6px; height: 6px; border-radius: 50%; background: var(--accent); animation: pulse 1.2s infinite ease-in-out; }
+.round-stats { font-size: 12px; color: var(--muted); margin-left: 4px; }
+.usage { display: grid; grid-template-columns: repeat(auto-fill, minmax(84px, 1fr)); gap: 8px; margin: -4px 0 16px; }
+.ring { position: relative; display: grid; justify-items: center; gap: 4px; padding: 8px 4px 6px; border-radius: 10px; cursor: default; }
+.ring:hover { background: #fff; box-shadow: var(--shadow); }
+.ring svg { width: 46px; height: 46px; transform: rotate(-90deg); }
+.ring .track { fill: none; stroke: var(--soft); stroke-width: 5; }
+.ring .fill { fill: none; stroke-width: 5; stroke-linecap: round; transition: stroke-dashoffset .4s; }
+.ring .fill.unknown { stroke: #c9c6bd; stroke-dasharray: 3 4; }
+.ring .center { position: absolute; top: 8px; height: 46px; display: grid; place-items: center; font-size: 11.5px; font-weight: 700; }
+.ring .label { font-size: 12px; font-weight: 600; color: var(--muted); max-width: 84px; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
+.ring .tip { display: none; position: absolute; top: 100%; left: 0; z-index: 10; width: 250px; margin-top: 4px; padding: 10px 12px;
+  background: #fff; border: 1px solid var(--line); border-radius: 10px; box-shadow: 0 6px 24px rgba(20,20,20,.12); font-size: 12.5px; line-height: 1.5; text-align: left; }
+.ring:hover .tip { display: block; }
+.ring .tip b { display: block; margin-bottom: 4px; font-size: 13px; }
+.ring .tip .w { display: flex; justify-content: space-between; gap: 8px; }
+.ring .tip .muted { color: var(--muted); margin-top: 6px; }
 .lanes { display: grid; gap: 12px; }
 .lane { padding: 14px 16px; border-top: 4px solid var(--c, var(--line)); min-width: 0; }
 .lane-head { display: flex; align-items: center; gap: 8px; margin-bottom: 8px; }
@@ -142,6 +177,7 @@ details[open] > summary::before { content: "▾ "; }
 <div class="app">
   <aside>
     <div class="brand"><b>argue</b><span>debate desk</span></div>
+    <div class="usage" id="usage"></div>
     <div class="card form" id="new-form">
       <label class="field">What should they debate?
         <textarea id="task" placeholder="e.g. Should a two-person startup build its MVP as a monolith or microservices?"></textarea>
@@ -325,7 +361,7 @@ details[open] > summary::before { content: "▾ "; }
       c.model = buildModel(c.events, c.result);
       render();
       if (!isDone(c)) state.pollTimer = setTimeout(poll, 1500);
-      else refreshRuns();
+      else { refreshRuns(); loadUsage(); }
     }).catch(function () { state.pollTimer = setTimeout(poll, 3000); });
   }
   function isDone(c) {
@@ -427,17 +463,26 @@ details[open] > summary::before { content: "▾ "; }
     if (c.process && c.process.state === "exited" && c.process.exitCode !== 0 && !result && c.process.stderrTail.length)
       main.appendChild(h("div", { class: "card verdict failed", style: "margin-top:12px" }, h("b", { text: "Process output" }), h("p", { class: "mono", text: c.process.stderrTail.join("\n") })));
 
-    var tl = h("div", { class: "section" }, h("h3", { text: "The debate, round by round" }));
-    if (m.roundOrder.length === 0) tl.appendChild(h("p", { class: "waiting" }, h("span", { class: "dot" }), "Waiting for the first round to start…"));
-    m.roundOrder.forEach(function (n) { tl.appendChild(renderRound(m.rounds[n], m, openDetails)); });
-    if (m.report && !result) tl.appendChild(h("p", { class: "waiting" }, h("span", { class: "dot" }), m.report.reporterId + " is writing the final report…"));
-    main.appendChild(tl);
-
+    // Results first; the debate itself stays folded until opened.
     if (result) {
       main.appendChild(renderClaims(result, m));
       main.appendChild(renderScores(result));
     }
+
+    var tl = h("div", { class: "section" },
+      h("div", { class: "section-head" }, h("h3", { text: result ? "How they got there" : "The debate so far" }),
+        m.roundOrder.length ? h("button", { class: "btn ghost small", onclick: function () { setAllRounds(true); } }, "Expand all") : null,
+        m.roundOrder.length ? h("button", { class: "btn ghost small", onclick: function () { setAllRounds(false); } }, "Collapse all") : null),
+      h("p", { class: "hint", style: "margin:-4px 0 10px", text: "Click a round to see each seat's answer, claims, judgements and reasoning." }));
+    if (m.roundOrder.length === 0) tl.appendChild(h("p", { class: "waiting" }, h("span", { class: "dot" }), "Waiting for the first round to start…"));
+    m.roundOrder.forEach(function (n) { tl.appendChild(renderRound(m.rounds[n], m, openDetails)); });
+    if (m.report && !result) tl.appendChild(h("p", { class: "waiting" }, h("span", { class: "dot" }), m.report.reporterId + " is writing the final report…"));
+    main.appendChild(tl);
     window.scrollTo(0, scrollY);
+  }
+
+  function setAllRounds(open) {
+    [].forEach.call(document.querySelectorAll("details.round"), function (d) { d.open = open; });
   }
 
   function renderVerdict(result, m, openDetails) {
@@ -466,8 +511,27 @@ details[open] > summary::before { content: "▾ "; }
 
   function renderRound(r, m, openDetails) {
     var name = phaseName(r);
-    var wrap = h("div", { class: "round" },
-      h("div", { class: "round-head" }, h("b", { text: "Round " + r.round + " · " + name[0] }), h("span", { text: name[1] })));
+    var key = "round:" + r.round;
+    // One line per round while folded: who answered, who is still thinking, stance totals.
+    var stances = { agree: 0, disagree: 0, revise: 0 };
+    var votes = { accept: 0, reject: 0 };
+    var chips = r.participants.map(function (pid) {
+      var resp = r.responses[pid];
+      (resp && resp.judgementsDetail || []).forEach(function (j) { if (stances[j.stance] !== undefined) stances[j.stance] += 1; });
+      (resp && resp.claimVotesDetail || []).forEach(function (v) { if (votes[v.vote] !== undefined) votes[v.vote] += 1; });
+      var st = !resp ? "thinking" : resp.eliminated ? "dropped" : "done";
+      return h("span", { class: "seat-chip " + st, style: "--c:" + colorFor(pid) }, h("i"), pid,
+        st === "thinking" ? h("span", { class: "dot" }) : st === "dropped" ? " ✕" : " ✓");
+    });
+    var stats = [];
+    if (stances.agree + stances.disagree + stances.revise) stats.push(stances.agree + " agree · " + stances.disagree + " disagree · " + stances.revise + " revise");
+    if (votes.accept + votes.reject) stats.push(votes.accept + " accept · " + votes.reject + " reject");
+    if (r.merges.length) stats.push(r.merges.length + " merged");
+    var wrap = h("details", { class: "round card", "data-key": key },
+      h("summary", null,
+        h("span", { class: "round-title" }, h("b", { text: "Round " + r.round + " · " + name[0] }), h("span", { text: name[1] })),
+        h("span", { class: "round-meta" }, chips, stats.length ? h("span", { class: "round-stats", text: stats.join("  ·  ") }) : null)));
+    wrap.open = openDetails[key] === true;
     var lanes = h("div", { class: "lanes", style: "grid-template-columns: repeat(" + Math.max(1, r.participants.length) + ", minmax(0, 1fr))" });
     r.participants.forEach(function (pid) { lanes.appendChild(renderLane(r, pid, m, openDetails)); });
     wrap.appendChild(lanes);
@@ -581,6 +645,65 @@ details[open] > summary::before { content: "▾ "; }
     api("/api/runs/" + encodeURIComponent(state.selected) + "/stop", { method: "POST" }).then(poll).catch(function (e) { alert(e.message); });
   }
 
+  // ---------- usage rings ----------
+  var USAGE_NAMES = { claude: "Claude", codex: "ChatGPT · Codex", antigravity: "Gemini · Antigravity", gemini: "Gemini CLI" };
+  function svg(tag, attrs) {
+    var el = document.createElementNS("http://www.w3.org/2000/svg", tag);
+    for (var k in attrs) el.setAttribute(k, attrs[k]);
+    for (var i = 2; i < arguments.length; i++) el.appendChild(arguments[i]);
+    return el;
+  }
+  function fmtReset(seconds) {
+    if (!seconds) return "";
+    var d = new Date(seconds * 1000);
+    var sameDay = d.toDateString() === new Date().toDateString();
+    return "resets " + (sameDay ? d.toLocaleTimeString([], { hour: "numeric", minute: "2-digit" })
+      : d.toLocaleDateString([], { weekday: "short", month: "short", day: "numeric" }) + " " + d.toLocaleTimeString([], { hour: "numeric", minute: "2-digit" }));
+  }
+  function fmtAgo(iso) {
+    if (!iso) return "";
+    var mins = Math.round((Date.now() - Date.parse(iso)) / 60000);
+    if (!(mins >= 0)) return "";
+    return mins < 1 ? "just now" : mins < 60 ? mins + " min ago" : Math.round(mins / 60) + " h ago";
+  }
+  function fmtTokens(n) { return n >= 1e6 ? (n / 1e6).toFixed(1) + "M" : n >= 1e3 ? Math.round(n / 1e3) + "k" : String(n); }
+  function renderRing(seat) {
+    var u = seat.usage; var pct = null; var center = "—";
+    var tip = h("div", { class: "tip" }, h("b", { text: USAGE_NAMES[seat.cliType] || seat.cliType }));
+    if (u.kind === "limits") {
+      // The ring shows the shortest window (the one you hit first), like Claude Code's ring.
+      pct = u.windows.length ? u.windows[0].usedPercent : 0;
+      center = Math.round(pct) + "%";
+      u.windows.forEach(function (w) {
+        tip.appendChild(h("div", { class: "w" }, h("span", { text: w.label + ": " + Math.round(w.usedPercent) + "% used" }), h("span", { class: "mono", text: fmtReset(w.resetsAt) })));
+      });
+      tip.appendChild(h("div", { class: "muted", text: (u.source === "claude" ? "Reported by Claude on its last debate call" : "From Codex's own session log") + (u.observedAt ? ", " + fmtAgo(u.observedAt) : "") + ". Shared with your other use of this plan." }));
+    } else if (u.kind === "tokens") {
+      center = fmtTokens(u.totalTokens);
+      tip.appendChild(h("div", { text: "argue used " + u.totalTokens.toLocaleString() + " tokens today across " + u.calls + " call" + (u.calls === 1 ? "" : "s") + "." }));
+      tip.appendChild(h("div", { class: "muted", text: "Antigravity doesn't tell command-line tools how much quota is left, so there's no % here. Its quota is separate from the Gemini app's daily limit." }));
+    } else {
+      tip.appendChild(h("div", { class: "muted", text: u.reason }));
+    }
+    var C = 2 * Math.PI * 18;
+    var color = pct === null ? null : pct >= 90 ? "var(--disagree)" : pct >= 70 ? "var(--revise)" : "var(--accent)";
+    var fill = pct === null
+      ? svg("circle", { class: "fill unknown", cx: 23, cy: 23, r: 18 })
+      : svg("circle", { class: "fill", cx: 23, cy: 23, r: 18, stroke: color, "stroke-dasharray": C, "stroke-dashoffset": C * (1 - Math.min(100, pct) / 100) });
+    return h("div", { class: "ring" },
+      svg("svg", { viewBox: "0 0 46 46" }, svg("circle", { class: "track", cx: 23, cy: 23, r: 18 }), fill),
+      h("span", { class: "center", text: center }),
+      h("span", { class: "label", text: seat.agents.join(", ") }),
+      tip);
+  }
+  function loadUsage() {
+    return api("/api/usage").then(function (data) {
+      var box = document.getElementById("usage");
+      box.textContent = "";
+      data.seats.forEach(function (seat) { box.appendChild(renderRing(seat)); });
+    }).catch(function () {});
+  }
+
   // A restarted "argue ui" prints a new link; opening it in this tab only changes the hash.
   window.addEventListener("hashchange", function () { location.reload(); });
   function showStaleToken() {
@@ -598,6 +721,8 @@ details[open] > summary::before { content: "▾ "; }
   }
   loadConfig().then(refreshRuns).then(function () { if (state.runs[0]) select(state.runs[0].requestId); });
   setInterval(refreshRuns, 5000);
+  loadUsage();
+  setInterval(loadUsage, 15000);
 })();
 </script>
 </body>

@@ -7,6 +7,7 @@ import { fileURLToPath } from "node:url";
 import { loadCliConfig, type LoadedCliConfig } from "../config.js";
 import { newRequestId, REQUEST_ID_PATTERN } from "../request-id.js";
 import { resolveRunPlan } from "../run-plan.js";
+import { readSeatUsage } from "../usage.js";
 import { renderUiPage } from "./page.js";
 
 const TOKEN_PLACEHOLDER = "{requestId}";
@@ -102,6 +103,26 @@ export async function startUiServer(options: UiServerOptions = {}): Promise<UiSe
           maxRounds: loaded.config.defaults?.maxRounds ?? 3,
           threshold: loaded.config.defaults?.consensusThreshold ?? 1
         }
+      });
+      return;
+    }
+
+    if (req.method === "GET" && url.pathname === "/api/usage") {
+      const loaded = await loadConfig();
+      // One entry per CLI kind, listing the agents that draw on that subscription.
+      const seats = new Map<string, string[]>();
+      for (const agent of loaded.config.agents) {
+        const provider = loaded.config.providers[agent.provider];
+        if (provider?.type !== "cli") continue;
+        seats.set(provider.cliType, [...(seats.get(provider.cliType) ?? []), agent.id]);
+      }
+      const usage = await readSeatUsage([...seats.keys()]);
+      sendJson(res, 200, {
+        seats: [...seats.entries()].map(([cliType, agents]) => ({
+          cliType,
+          agents,
+          usage: usage[cliType] ?? { kind: "unknown", source: cliType, reason: "This CLI does not report usage." }
+        }))
       });
       return;
     }
