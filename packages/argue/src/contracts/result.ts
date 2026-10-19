@@ -170,7 +170,8 @@ export const EliminationRecordSchema = z.object({
   participantId: z.string().min(1),
   round: z.number().int().min(0),
   reason: z.enum(["timeout", "error"]),
-  at: z.string().min(1)
+  at: z.string().min(1),
+  error: z.string().optional()
 });
 
 export type EliminationRecord = z.infer<typeof EliminationRecordSchema>;
