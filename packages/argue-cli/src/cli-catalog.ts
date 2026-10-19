@@ -5,7 +5,16 @@ import type { CliType } from "./config.js";
 
 /** A known agent CLI that argue can seat as a participant. */
 export interface KnownCli {
-  cliType: Exclude<CliType, "text" | "generic">;
+  cliType: Exclude<CliType, "generic">;
+  /** Unique catalog id; defaults to cliType. `text` presets use their command name. */
+  id?: string;
+  /** For `text` presets: templated args/env that make the CLI answer once without acting. */
+  presetArgs?: string[];
+  presetEnv?: Record<string, string>;
+  /** Set when the CLI approves its own tool use in script mode, so argue cannot make it read-only. */
+  unrestricted?: string;
+  /** Preset flags taken from the CLI's docs but not yet run against a real install. */
+  unverified?: boolean;
   command: string;
   label: string;
   /** Args that print the CLI's model list. Only set where the output format is verified. */
@@ -82,8 +91,140 @@ export const KNOWN_CLIS: KnownCli[] = [
   },
   { cliType: "pi", command: "pi", label: "pi", install: "see the pi coding agent docs" },
   { cliType: "droid", command: "droid", label: "Factory droid", install: "see https://factory.ai" },
-  { cliType: "amp", command: "amp", label: "Amp", install: "see https://ampcode.com" }
+  { cliType: "amp", command: "amp", label: "Amp", install: "see https://ampcode.com" },
+
+  // Extra CLIs, seated through the `text` cliType. Each preset asks for one plain answer with
+  // the CLI's tools off or read-only where the CLI allows it.
+  {
+    cliType: "text",
+    id: "ollama",
+    command: "ollama",
+    label: "Ollama (local models: Llama, Mistral, Qwen, DeepSeek, Gemma…)",
+    presetArgs: ["run", "{providerModel}"],
+    listModelsArgs: ["list"],
+    parseModels: parseOllamaList,
+    modelHint: "a pulled model, e.g. llama3.3 (see ollama list)",
+    install: "https://ollama.com/download, then ollama pull llama3.3",
+    note: "runs models on this computer; no tools, nothing leaves the machine"
+  },
+  {
+    cliType: "text",
+    id: "llm",
+    command: "llm",
+    label: "llm (many providers via plugins)",
+    presetArgs: ["-m", "{providerModel}"],
+    listModelsArgs: ["models"],
+    parseModels: parseLlmModels,
+    modelHint: "a model id from llm models",
+    install: "pipx install llm (or uv tool install llm)"
+  },
+  {
+    cliType: "text",
+    id: "qwen",
+    command: "qwen",
+    label: "Qwen Code",
+    // A Gemini CLI fork: same read-only "plan" approval mode; prompt on stdin.
+    presetArgs: ["--approval-mode", "plan", "-m", "{providerModel}"],
+    suggestedModels: ["qwen3-coder-plus"],
+    install: "npm install -g @qwen-code/qwen-code",
+    unverified: true
+  },
+  {
+    cliType: "text",
+    id: "aider",
+    command: "aider",
+    label: "Aider (OpenAI, Anthropic, DeepSeek, Grok, local…)",
+    // Ask mode answers questions and never edits files.
+    presetArgs: [
+      "--chat-mode",
+      "ask",
+      "--no-git",
+      "--no-auto-commits",
+      "--no-check-update",
+      "--no-pretty",
+      "--no-stream",
+      "--model",
+      "{providerModel}",
+      "--message",
+      "{prompt}"
+    ],
+    modelHint: "any model aider supports, e.g. deepseek/deepseek-chat or xai/grok-4",
+    install: "python -m pip install aider-install && aider-install",
+    unverified: true
+  },
+  {
+    cliType: "text",
+    id: "cursor-agent",
+    command: "cursor-agent",
+    label: "Cursor Agent",
+    // Without --force, print mode only proposes changes.
+    presetArgs: ["-p", "--output-format", "text", "--model", "{providerModel}", "{prompt}"],
+    modelHint: "a Cursor model id (cursor-agent --list-models)",
+    install: "see https://cursor.com/cli",
+    unverified: true
+  },
+  {
+    cliType: "text",
+    id: "goose",
+    command: "goose",
+    label: "Goose",
+    presetArgs: ["run", "-i", "-", "--no-session"],
+    // chat mode: Goose answers without using tools.
+    presetEnv: { GOOSE_MODE: "chat" },
+    modelHint: "the model set in goose configure",
+    install: "see https://block.github.io/goose",
+    unverified: true
+  },
+  {
+    cliType: "text",
+    id: "kimi",
+    command: "kimi",
+    label: "Kimi CLI",
+    presetArgs: ["--quiet", "-m", "{providerModel}", "-p", "{prompt}"],
+    suggestedModels: ["kimi-k2"],
+    unrestricted:
+      "Kimi's print mode approves its own tool use, so it could run commands. Use it only in an empty debate folder.",
+    install: "uv tool install kimi-cli",
+    unverified: true
+  },
+  {
+    cliType: "text",
+    id: "vibe",
+    command: "vibe",
+    label: "Mistral Vibe",
+    presetArgs: ["--prompt", "{prompt}", "--output", "text"],
+    suggestedModels: ["devstral-medium"],
+    unrestricted:
+      "Vibe's programmatic mode auto-approves its tools, so it could run commands. Use it only in an empty debate folder.",
+    install: "uv tool install mistral-vibe",
+    unverified: true
+  }
 ];
+
+export function catalogId(cli: KnownCli): string {
+  return cli.id ?? cli.cliType;
+}
+
+/** `ollama list`: a NAME/ID/SIZE/MODIFIED table; take the NAME column, dropping ":latest". */
+export function parseOllamaList(stdout: string): string[] {
+  const names = stdout
+    .split(/\r?\n/)
+    .slice(1)
+    .map((line) => line.trim().split(/\s+/)[0] ?? "")
+    .filter((name) => /^[\w.\-/:]+$/.test(name))
+    .map((name) => name.replace(/:latest$/, ""));
+  return [...new Set(names)];
+}
+
+/** `llm models`: lines like "OpenAI Chat: gpt-4o (aliases: 4o)". */
+export function parseLlmModels(stdout: string): string[] {
+  const ids: string[] = [];
+  for (const line of stdout.split(/\r?\n/)) {
+    const match = /^[^:]+:\s+([\w.\-/:@]+)/.exec(line.trim());
+    if (match) ids.push(match[1]!);
+  }
+  return [...new Set(ids)];
+}
 
 /** Parses "model-id<whitespace>description" lines, skipping banners and blank lines. */
 export function parseTabularModels(stdout: string): string[] {
@@ -249,8 +390,9 @@ function captureStdout(command: string, args: string[], env: NodeJS.ProcessEnv, 
 
 /** The one-liner that adds a CLI + model as a provider and agent in the workspace config. */
 export function addProviderCommand(cli: KnownCli, model: string): string {
-  const id = cli.cliType;
-  return `argue config add-provider --id ${id} --type cli --cli-type ${cli.cliType} --model-id ${model} --agent ${id}`;
+  const id = catalogId(cli);
+  const preset = cli.presetArgs ? ` --command ${cli.command} --args ${cli.presetArgs.join(",")}` : "";
+  return `argue config add-provider --id ${id} --type cli --cli-type ${cli.cliType}${preset} --model-id ${model} --agent ${id}`;
 }
 
 export function formatDetectedClis(detected: DetectedCli[]): string[] {

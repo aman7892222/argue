@@ -10,3 +10,4 @@ argue.config.json
 out/
 .argue/
 *.events.jsonl
+debates/

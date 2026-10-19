@@ -1,5 +1,5 @@
-import { access, mkdir, writeFile } from "node:fs/promises";
-import { dirname, resolve } from "node:path";
+import { access, mkdir, stat, writeFile } from "node:fs/promises";
+import { basename, dirname, resolve } from "node:path";
 import { ActionTaskResultSchema, ArgueResultSchema, type ActionTaskInput, type AgentTaskInput } from "@onevcat/argue";
 import packageMetadata from "../package.json" with { type: "json" };
 import {
@@ -36,6 +36,8 @@ export type CliRunOptions = {
   configPath?: string;
   inputPath?: string;
   agents?: string[];
+  /** Files (PDFs, images, text) the seats should read as part of the task. */
+  attachments?: string[];
   /** Per-run model and effort overrides by agent id; the config file is not changed. */
   agentModels?: Record<string, string>;
   agentEfforts?: Record<string, string>;
@@ -216,6 +218,23 @@ async function runUi(args: string[], io: Pick<typeof console, "log" | "error">):
   }
 }
 
+const MAX_ATTACHMENTS = 10;
+const MAX_ATTACHMENT_BYTES = 25 * 1024 * 1024;
+
+/** Absolute paths for --attach, each an existing regular file within the size limit. */
+export async function resolveAttachments(paths: string[]): Promise<string[]> {
+  if (paths.length > MAX_ATTACHMENTS) throw new Error(`--attach: at most ${MAX_ATTACHMENTS} files`);
+  const files: string[] = [];
+  for (const path of paths) {
+    const abs = resolve(path);
+    const info = await stat(abs).catch(() => null);
+    if (!info?.isFile()) throw new Error(`--attach: not a file: ${abs}`);
+    if (info.size > MAX_ATTACHMENT_BYTES) throw new Error(`--attach: larger than 25 MB: ${abs}`);
+    files.push(abs);
+  }
+  return files;
+}
+
 /** Applies --model-for / --effort-for to the in-memory config for this run only. */
 export function applyAgentOverrides(
   loaded: LoadedCliConfig,
@@ -313,6 +332,15 @@ async function runHeadless(args: string[], io: Pick<typeof console, "log" | "err
       runInput,
       overrides: options.value
     });
+    if (options.value.attachments?.length) {
+      const files = await resolveAttachments(options.value.attachments);
+      // The CLI runners read this to hand files to each seat (Read for Claude, -i for Codex, ...).
+      process.env.ARGUE_ATTACHMENTS = JSON.stringify(files);
+      const note =
+        "\n\nAttached files (read them as part of the task):\n" + files.map((f) => `- ${basename(f)}: ${f}`).join("\n");
+      plan.task += note;
+      plan.startInput.task += note;
+    }
   } catch (error) {
     io.error(String(error));
     return { ok: false, code: 1 };
@@ -979,6 +1007,14 @@ function parseRunOptions(args: string[]): { ok: true; value: CliRunOptions } | {
       continue;
     }
 
+    if (arg === "--attach") {
+      const value = args[i + 1];
+      if (!value) return { ok: false, error: "--attach requires a file path" };
+      (out.attachments ??= []).push(value);
+      i += 1;
+      continue;
+    }
+
     if (arg === "--model-for" || arg === "--effort-for") {
       // Repeatable: --model-for claude=sonnet --effort-for claude=high (this run only).
       const value = args[i + 1] ?? "";
@@ -1621,6 +1657,7 @@ function printHelp(io: Pick<typeof console, "log">): void {
   io.log("  --input <path>                  run input JSON path (task/agents etc.)");
   io.log("  --agents a,b,c                  override selected agents");
   io.log("  --model-for id=model  --effort-for id=level   per-run model / effort for a seat (repeatable)");
+  io.log("  --attach <file>                 give the seats a PDF / image / text file (repeatable)");
   io.log("  --task <text>");
   io.log("  --request-id <id>");
   io.log("  --jsonl <path> --result <path> --summary <path>");

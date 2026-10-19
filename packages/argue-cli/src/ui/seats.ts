@@ -1,4 +1,5 @@
 import { readFile, writeFile } from "node:fs/promises";
+import { catalogId, type KnownCli } from "../cli-catalog.js";
 import { CLI_TYPES, defaultCliCommand, WorkspaceConfigSchema, type CliType } from "../config.js";
 
 /** Adding and removing CLI seats (provider + agent) in the workspace config, for the debate desk. */
@@ -9,11 +10,20 @@ export type AddSeatRequest = {
   model: string;
   command?: string;
   args?: string[];
+  env?: Record<string, string>;
+  permissionMode?: "safe" | "auto";
 };
 
 const ID_PATTERN = /^[A-Za-z0-9][\w.-]{0,39}$/;
 
-export function parseAddSeatRequest(body: unknown): { ok: true; value: AddSeatRequest } | { ok: false; error: string } {
+/**
+ * Validates a seat from the page. A `preset` (catalog id such as "ollama") takes its args and
+ * env from the server's own catalog, never from the request, so the page cannot inject flags.
+ */
+export function parseAddSeatRequest(
+  body: unknown,
+  catalog: KnownCli[] = []
+): { ok: true; value: AddSeatRequest } | { ok: false; error: string } {
   if (!body || typeof body !== "object") return { ok: false, error: "expected a JSON object" };
   const input = body as Record<string, unknown>;
 
@@ -22,15 +32,33 @@ export function parseAddSeatRequest(body: unknown): { ok: true; value: AddSeatRe
     return { ok: false, error: "seat name: 1-40 letters, digits, '.', '_' or '-', starting with a letter or digit" };
   }
 
+  const model = typeof input.model === "string" ? input.model.trim() : "";
+  if (!model || model.length > 200 || /[\r\n]/.test(model)) return { ok: false, error: "model is required" };
+
+  const command = typeof input.command === "string" && input.command.trim() ? input.command.trim() : undefined;
+
+  if (input.preset !== undefined) {
+    const preset = catalog.find((cli) => catalogId(cli) === input.preset && cli.presetArgs);
+    if (!preset) return { ok: false, error: "unknown CLI preset" };
+    return {
+      ok: true,
+      value: {
+        id,
+        cliType: "text",
+        model,
+        command: command ?? preset.command,
+        args: [...preset.presetArgs!],
+        ...(preset.presetEnv ? { env: { ...preset.presetEnv } } : {}),
+        // Recorded so the config says plainly that this CLI approves its own tools.
+        ...(preset.unrestricted ? { permissionMode: "auto" as const } : {})
+      }
+    };
+  }
+
   const cliType = input.cliType;
   if (typeof cliType !== "string" || !(CLI_TYPES as readonly string[]).includes(cliType) || cliType === "generic") {
     return { ok: false, error: "pick a CLI type" };
   }
-
-  const model = typeof input.model === "string" ? input.model.trim() : "";
-  if (!model || model.length > 200) return { ok: false, error: "model is required" };
-
-  const command = typeof input.command === "string" && input.command.trim() ? input.command.trim() : undefined;
   if (cliType === "text" && !command) return { ok: false, error: "a custom CLI needs its command" };
 
   let args: string[] | undefined;
@@ -58,7 +86,7 @@ async function readRaw(configPath: string): Promise<RawConfig> {
   return JSON.parse(await readFile(configPath, "utf8")) as RawConfig;
 }
 
-async function writeValidated(configPath: string, config: RawConfig): Promise<void> {
+export async function writeValidated(configPath: string, config: RawConfig): Promise<void> {
   // Refuse to write anything argue itself would reject.
   WorkspaceConfigSchema.parse(config);
   await writeFile(configPath, `${JSON.stringify(config, null, 2)}\n`, "utf8");
@@ -77,8 +105,10 @@ export async function addSeat(configPath: string, seat: AddSeatRequest): Promise
   config.providers[providerId] = {
     type: "cli",
     cliType: seat.cliType,
+    ...(seat.permissionMode ? { permissionMode: seat.permissionMode } : {}),
     command: seat.command ?? defaultCliCommand(seat.cliType),
     args: seat.args ?? [],
+    ...(seat.env ? { env: seat.env } : {}),
     models: { [seat.model]: {} }
   };
   config.agents.push({ id: seat.id, provider: providerId, model: seat.model });

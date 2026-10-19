@@ -1,19 +1,31 @@
 import { spawn as nodeSpawn, type ChildProcess } from "node:child_process";
 import { randomBytes, timingSafeEqual } from "node:crypto";
 import { createReadStream } from "node:fs";
-import { readdir, readFile, stat } from "node:fs/promises";
+import { mkdir, readdir, readFile, stat, writeFile } from "node:fs/promises";
 import { createServer, type IncomingMessage, type Server, type ServerResponse } from "node:http";
+import { basename, dirname, isAbsolute, join } from "node:path";
 import { fileURLToPath } from "node:url";
 import { loadWorkspaceConfig, type LoadedCliConfig } from "../config.js";
 import { newRequestId, REQUEST_ID_PATTERN } from "../request-id.js";
 import { resolveOutputPaths, resolveRunPlan } from "../run-plan.js";
-import { detectClis } from "../cli-catalog.js";
+import { catalogId, detectClis, KNOWN_CLIS } from "../cli-catalog.js";
 import { readSeatUsage } from "../usage.js";
-import { addSeat, parseAddSeatRequest, removeSeat } from "./seats.js";
+import { addSeat, parseAddSeatRequest, removeSeat, writeValidated } from "./seats.js";
+import {
+  chooseFolderDialog,
+  findPdfBrowser,
+  libraryDir,
+  listLibrary,
+  openWithOs,
+  readSaved,
+  saveToLibrary
+} from "./library.js";
 import { renderUiPage } from "./page.js";
 
 const TOKEN_PLACEHOLDER = "{requestId}";
 const MAX_BODY_BYTES = 64 * 1024;
+// Starting a debate can carry attachments (base64): up to 60 MB of files.
+const MAX_RUN_BODY_BYTES = 90 * 1024 * 1024;
 const STDERR_TAIL_LINES = 40;
 // A run with no new events for longer than argue's default per-round timeout is treated as abandoned.
 const STALE_AFTER_MS = 25 * 60 * 1000;
@@ -49,6 +61,9 @@ type LaunchedRun = {
   stderrTail: string[];
   startedAt: string;
   task: string;
+  settings?: StartRequest["settings"];
+  saved?: { folder: string; pdf: boolean };
+  saveError?: string;
 };
 
 /**
@@ -136,7 +151,10 @@ export async function startUiServer(options: UiServerOptions = {}): Promise<UiSe
       const detected = await detectClis({ list: url.searchParams.get("list") === "1" });
       sendJson(res, 200, {
         clis: detected.map((d) => ({
+          id: catalogId(d.cli),
           cliType: d.cli.cliType,
+          unrestricted: d.cli.unrestricted ?? null,
+          unverified: !!d.cli.unverified,
           label: d.cli.label,
           command: d.cli.command,
           installed: !!d.path,
@@ -154,7 +172,7 @@ export async function startUiServer(options: UiServerOptions = {}): Promise<UiSe
     }
 
     if (req.method === "POST" && url.pathname === "/api/seats") {
-      const parsed = parseAddSeatRequest(await readBody(req));
+      const parsed = parseAddSeatRequest(await readBody(req), KNOWN_CLIS);
       if (!parsed.ok) {
         sendJson(res, 400, { error: parsed.error });
         return;
@@ -194,7 +212,9 @@ export async function startUiServer(options: UiServerOptions = {}): Promise<UiSe
             provider: agent.provider,
             model: agent.model,
             role: agent.role,
-            cliType: provider?.type === "cli" ? provider.cliType : null
+            cliType: provider?.type === "cli" ? provider.cliType : null,
+            // Lets the page match a custom seat to its catalog entry and theme (e.g. "ollama").
+            command: provider?.type === "cli" && provider.command ? commandName(provider.command) : null
           };
         }),
         defaults: {
@@ -234,26 +254,48 @@ export async function startUiServer(options: UiServerOptions = {}): Promise<UiSe
         if (!runs.some((run) => run.requestId === requestId)) runs.push(runPathsFor(loaded, requestId));
       }
       runs.sort((a, b) => b.requestId.localeCompare(a.requestId));
-      sendJson(res, 200, {
-        runs: await Promise.all(
-          runs.map(async (paths) => ({
-            ...(await summarizeRun(paths)),
-            process: describeLaunch(launched.get(paths.requestId))
-          }))
-        )
-      });
+      const library = await listLibrary(libraryDir(loaded));
+      const savedById = new Map(library.map((entry) => [entry.requestId, entry]));
+      const summaries: Array<Record<string, unknown>> = await Promise.all(
+        runs.map(async (paths) => ({
+          ...(await summarizeRun(paths)),
+          saved: savedById.has(paths.requestId),
+          process: describeLaunch(launched.get(paths.requestId))
+        }))
+      );
+      // Saved debates whose working files are gone (moved machine, cleaned out/) still show up.
+      for (const entry of library) {
+        if (runs.some((run) => run.requestId === entry.requestId)) continue;
+        summaries.push({
+          requestId: entry.requestId,
+          status: entry.status,
+          title: entry.title,
+          prompt: null,
+          elapsedMs: null,
+          saved: true,
+          process: null
+        });
+      }
+      summaries.sort((a, b) => String(b.requestId).localeCompare(String(a.requestId)));
+      sendJson(res, 200, { runs: summaries });
       return;
     }
 
-    const runMatch = /^\/api\/runs\/([^/]+)(\/stop)?$/.exec(url.pathname);
+    if (url.pathname.startsWith("/api/library")) {
+      await handleLibrary(req, res, url);
+      return;
+    }
+
+    const runMatch = /^\/api\/runs\/([^/]+)(?:\/(stop|save|open))?$/.exec(url.pathname);
     if (runMatch) {
       const requestId = decodeURIComponent(runMatch[1]!);
       if (!REQUEST_ID_PATTERN.test(requestId)) {
         sendJson(res, 400, { error: "invalid request id" });
         return;
       }
+      const action = runMatch[2];
 
-      if (runMatch[2] && req.method === "POST") {
+      if (action === "stop" && req.method === "POST") {
         const run = launched.get(requestId);
         if (!run || run.state !== "running") {
           sendJson(res, 409, { error: "run is not running in this UI session" });
@@ -264,28 +306,69 @@ export async function startUiServer(options: UiServerOptions = {}): Promise<UiSe
         return;
       }
 
-      if (!runMatch[2] && req.method === "GET") {
+      if (action === "save" && req.method === "POST") {
+        const loaded = await loadConfig();
+        try {
+          sendJson(res, 200, await saveRun(loaded, requestId, launched.get(requestId)?.settings));
+        } catch (error) {
+          sendJson(res, 400, { error: error instanceof Error ? error.message : String(error) });
+        }
+        return;
+      }
+
+      if (action === "open" && req.method === "POST") {
+        // Opens this debate's saved PDF / HTML / folder with the OS. Only files inside its library folder.
+        const loaded = await loadConfig();
+        const body = (await readBody(req)) as { what?: unknown } | null;
+        const entry = (await listLibrary(libraryDir(loaded))).find((e) => e.requestId === requestId);
+        if (!entry) {
+          sendJson(res, 404, { error: "this debate is not saved yet" });
+          return;
+        }
+        const what = body?.what;
+        const target =
+          what === "pdf"
+            ? join(entry.folder, "report.pdf")
+            : what === "html"
+              ? join(entry.folder, "report.html")
+              : entry.folder;
+        openWithOs(target);
+        sendJson(res, 200, { ok: true });
+        return;
+      }
+
+      if (!action && req.method === "GET") {
         const loaded = await loadConfig();
         const paths = runPathsFor(loaded, requestId);
         const since = Number(url.searchParams.get("since") ?? "0");
         const events = await readEvents(paths.jsonlPath);
+        let result = await readJson(paths.resultPath);
+        const entry = (await listLibrary(libraryDir(loaded))).find((e) => e.requestId === requestId);
+        if (!result && entry) result = (await readSaved(entry.folder))?.result ?? null;
         sendJson(res, 200, {
           requestId,
           events: events.filter((event) => typeof event.seq === "number" && event.seq >= since),
-          result: await readJson(paths.resultPath),
+          result,
           error: await readJson(paths.errorPath),
-          process: describeLaunch(launched.get(requestId))
+          process: describeLaunch(launched.get(requestId)),
+          saved: entry ? { folder: entry.folder, hasPdf: entry.hasPdf } : null,
+          attachments: await listAttachmentNames(attachmentsDirFor(paths, requestId))
         });
         return;
       }
     }
 
     if (req.method === "POST" && url.pathname === "/api/runs") {
-      const body = await readBody(req);
+      const body = await readBody(req, MAX_RUN_BODY_BYTES);
       const loaded = await loadConfig();
       const request = parseStartRequest(body, loaded);
       if (!request.ok) {
         sendJson(res, 400, { error: request.error });
+        return;
+      }
+      const files = parseAttachments((body as { attachments?: unknown } | null)?.attachments);
+      if (!files.ok) {
+        sendJson(res, 400, { error: files.error });
         return;
       }
 
@@ -296,6 +379,18 @@ export async function startUiServer(options: UiServerOptions = {}): Promise<UiSe
         runInput: {},
         overrides: { requestId, task: request.value.task, agents: request.value.agents }
       });
+
+      // Attachments live with the run's own files, in this user's workspace.
+      const attachDir = attachmentsDirFor(runPathsFor(loaded, requestId), requestId);
+      const attachPaths: string[] = [];
+      if (files.value.length) {
+        await mkdir(attachDir, { recursive: true });
+        for (const file of files.value) {
+          const path = join(attachDir, file.name);
+          await writeFile(path, file.data, { flag: "wx" });
+          attachPaths.push(path);
+        }
+      }
 
       const args = [
         ...runCommand.args,
@@ -318,6 +413,7 @@ export async function startUiServer(options: UiServerOptions = {}): Promise<UiSe
           ...(s.model && request.value.agents.includes(id) ? ["--model-for", `${id}=${s.model}`] : []),
           ...(s.effort && request.value.agents.includes(id) ? ["--effort-for", `${id}=${s.effort}`] : [])
         ]),
+        ...attachPaths.flatMap((path) => ["--attach", path]),
         "--no-color"
       ];
       const child = nodeSpawn(runCommand.command, args, {
@@ -333,7 +429,8 @@ export async function startUiServer(options: UiServerOptions = {}): Promise<UiSe
         exitCode: null,
         stderrTail: [],
         startedAt: new Date().toISOString(),
-        task: request.value.task
+        task: request.value.task,
+        settings: request.value.settings
       };
       child.stderr?.setEncoding("utf8");
       child.stderr?.on("data", (chunk: string) => {
@@ -348,10 +445,72 @@ export async function startUiServer(options: UiServerOptions = {}): Promise<UiSe
       child.on("close", (code) => {
         run.state = "exited";
         run.exitCode = code;
+        // Finished debates go to the library (PDF + HTML + JSON) automatically.
+        if (code === 0) {
+          void saveRun(loaded, requestId, run.settings).then(
+            (saved) => (run.saved = saved),
+            (error: unknown) => (run.saveError = error instanceof Error ? error.message : String(error))
+          );
+        }
       });
       launched.set(requestId, run);
 
       sendJson(res, 201, { requestId });
+      return;
+    }
+
+    sendJson(res, 404, { error: "not found" });
+  }
+
+  /** /api/library: where finished debates are saved (each user picks their own folder). */
+  async function handleLibrary(req: IncomingMessage, res: ServerResponse, url: URL): Promise<void> {
+    const loaded = await loadConfig();
+    const dir = libraryDir(loaded);
+
+    if (req.method === "GET" && url.pathname === "/api/library") {
+      sendJson(res, 200, {
+        dir,
+        count: (await listLibrary(dir)).length,
+        pdf: !!(await findPdfBrowser())
+      });
+      return;
+    }
+
+    if (req.method === "POST" && (url.pathname === "/api/library/choose" || url.pathname === "/api/library/dir")) {
+      let chosen: string | null;
+      if (url.pathname === "/api/library/choose") {
+        chosen = await chooseFolderDialog();
+        if (!chosen) {
+          sendJson(res, 200, { cancelled: true, dir });
+          return;
+        }
+      } else {
+        const body = (await readBody(req)) as { dir?: unknown } | null;
+        chosen = typeof body?.dir === "string" ? body.dir.trim() : "";
+        if (!chosen || !isAbsolute(chosen) || /[\r\n]/.test(chosen)) {
+          sendJson(res, 400, { error: "enter a full folder path, e.g. D:\\Debates" });
+          return;
+        }
+      }
+      try {
+        await mkdir(chosen, { recursive: true });
+        const raw = JSON.parse(await readFile(loaded.configPath, "utf8")) as Record<string, unknown>;
+        raw.library = { dir: chosen };
+        await writeValidated(loaded.configPath, raw);
+      } catch (error) {
+        sendJson(res, 400, {
+          error: `can't use that folder: ${error instanceof Error ? error.message : String(error)}`
+        });
+        return;
+      }
+      sendJson(res, 200, { dir: chosen });
+      return;
+    }
+
+    if (req.method === "POST" && url.pathname === "/api/library/open") {
+      await mkdir(dir, { recursive: true });
+      openWithOs(dir);
+      sendJson(res, 200, { ok: true });
       return;
     }
 
@@ -377,6 +536,103 @@ function defaultRunCommand(): { command: string; args: string[] } {
   // dist/ui/server.js -> dist/cli.js
   const cliEntry = fileURLToPath(new URL("../cli.js", import.meta.url));
   return { command: process.execPath, args: [cliEntry] };
+}
+
+/** Saves a finished run (or re-renders a saved one) into the library. */
+async function saveRun(
+  loaded: LoadedCliConfig,
+  requestId: string,
+  settings?: StartRequest["settings"]
+): Promise<{ folder: string; pdf: boolean }> {
+  const paths = runPathsFor(loaded, requestId);
+  const result = (await readJson(paths.resultPath)) as (Record<string, unknown> & { requestId?: string }) | null;
+  if (!result) {
+    const entry = (await listLibrary(libraryDir(loaded))).find((e) => e.requestId === requestId);
+    const saved = entry ? await readSaved(entry.folder) : null;
+    if (!saved) throw new Error("this debate has not finished, so there is nothing to save yet");
+    return saveToLibrary({
+      dir: libraryDir(loaded),
+      result: saved.result,
+      seats: saved.seats,
+      attachments: saved.attachments
+    });
+  }
+  const scoreboard = Array.isArray(result.scoreboard) ? (result.scoreboard as Array<{ participantId?: string }>) : [];
+  const participants = new Set(scoreboard.map((s) => s.participantId));
+  const seats = loaded.config.agents
+    .filter((agent) => participants.has(agent.id))
+    .map((agent) => {
+      const provider = loaded.config.providers[agent.provider];
+      const cli =
+        provider?.type === "cli"
+          ? provider.cliType === "text" && provider.command
+            ? commandName(provider.command)
+            : provider.cliType
+          : provider?.type;
+      return { id: agent.id, model: settings?.[agent.id]?.model ?? agent.model, cli };
+    });
+  return saveToLibrary({
+    dir: libraryDir(loaded),
+    result,
+    seats,
+    attachments: await listAttachmentNames(attachmentsDirFor(paths, requestId))
+  });
+}
+
+/** A run's attachments folder: <run folder>/attachments (or <id>-attachments for flat layouts). */
+export function attachmentsDirFor(paths: RunPaths, requestId: string): string {
+  const dir = dirname(paths.resultPath);
+  return basename(dir) === requestId ? join(dir, "attachments") : join(dir, `${requestId}-attachments`);
+}
+
+async function listAttachmentNames(dir: string): Promise<string[]> {
+  try {
+    return (await readdir(dir)).sort();
+  } catch {
+    return [];
+  }
+}
+
+const ATTACHMENT_TYPES = /\.(pdf|png|jpe?g|webp|gif|txt|md|csv)$/i;
+const MAX_ATTACHMENTS = 10;
+const MAX_ATTACHMENT_BYTES = 25 * 1024 * 1024;
+const MAX_ATTACHMENTS_TOTAL = 60 * 1024 * 1024;
+
+/** Validates uploaded attachments: { name, data (base64) }[]. Names are reduced to a safe basename. */
+export function parseAttachments(
+  raw: unknown
+): { ok: true; value: Array<{ name: string; data: Buffer }> } | { ok: false; error: string } {
+  if (raw === undefined || raw === null) return { ok: true, value: [] };
+  if (!Array.isArray(raw)) return { ok: false, error: "attachments must be a list" };
+  if (raw.length > MAX_ATTACHMENTS) return { ok: false, error: `attach at most ${MAX_ATTACHMENTS} files` };
+  const out: Array<{ name: string; data: Buffer }> = [];
+  const names = new Set<string>();
+  let total = 0;
+  for (const item of raw as Array<{ name?: unknown; data?: unknown }>) {
+    if (typeof item?.name !== "string" || typeof item.data !== "string") return { ok: false, error: "bad attachment" };
+    // Keep only the last path segment and harmless characters: no folders, no "..", no device names.
+    let name = (item.name.split(/[\\/]/).pop() ?? "")
+      .replace(/[^\w.\- ()]/g, "_")
+      .replace(/^[.\s]+/, "")
+      .slice(-100);
+    if (!ATTACHMENT_TYPES.test(name))
+      return { ok: false, error: `${item.name}: only PDF, image or text files can be attached` };
+    const data = Buffer.from(item.data, "base64");
+    if (!data.length) return { ok: false, error: `${name} is empty` };
+    if (data.length > MAX_ATTACHMENT_BYTES) return { ok: false, error: `${name} is larger than 25 MB` };
+    total += data.length;
+    if (total > MAX_ATTACHMENTS_TOTAL) return { ok: false, error: "attachments add up to more than 60 MB" };
+    for (let n = 2; names.has(name.toLowerCase()); n++) name = `${n}-${name}`;
+    names.add(name.toLowerCase());
+    out.push({ name, data });
+  }
+  return { ok: true, value: out };
+}
+
+/** "C:\x\Ollama.EXE" -> "ollama" */
+export function commandName(command: string): string {
+  const base = command.split(/[\\/]/).pop() ?? command;
+  return base.replace(/\.(exe|cmd|bat|ps1)$/i, "").toLowerCase();
 }
 
 /** Constant-time comparison, so response timing reveals nothing about the token. */
@@ -526,7 +782,9 @@ function describeLaunch(run: LaunchedRun | undefined): Record<string, unknown> |
     exitCode: run.exitCode,
     startedAt: run.startedAt,
     stderrTail: run.stderrTail,
-    task: run.task
+    task: run.task,
+    saved: run.saved ?? null,
+    saveError: run.saveError ?? null
   };
 }
 
@@ -579,13 +837,13 @@ async function exists(path: string): Promise<boolean> {
   }
 }
 
-function readBody(req: IncomingMessage): Promise<unknown> {
+function readBody(req: IncomingMessage, maxBytes = MAX_BODY_BYTES): Promise<unknown> {
   return new Promise((resolve, reject) => {
     let size = 0;
     const chunks: Buffer[] = [];
     req.on("data", (chunk: Buffer) => {
       size += chunk.length;
-      if (size > MAX_BODY_BYTES) {
+      if (size > maxBytes) {
         reject(new Error("request body too large"));
         req.destroy();
         return;

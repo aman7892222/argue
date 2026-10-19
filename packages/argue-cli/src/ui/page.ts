@@ -3,8 +3,11 @@
 // deliberately avoids backticks and dollar-brace so nothing is interpolated by this module.
 // All model-generated text is inserted with textContent, never innerHTML.
 
+import { SEAT_THEMES } from "./themes.js";
+
 export function renderUiPage(): string {
-  return PAGE;
+  // Theme data is our own constant; "<" is still escaped so it can never close the script tag.
+  return PAGE.replace("/*SEAT_THEMES*/[]", JSON.stringify(SEAT_THEMES).replace(/</g, "\\u003c"));
 }
 
 const PAGE = String.raw`<!doctype html>
@@ -116,6 +119,19 @@ textarea:focus, select:focus, input[type=text]:focus { outline: none; border-col
 .run-item .t { font-weight: 600; font-size: 13.5px; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
 .run-item .m { display: flex; gap: 8px; align-items: center; font-size: 11.5px; color: var(--muted); }
 .side-foot { margin-top: auto; padding-top: 18px; display: flex; align-items: center; gap: 8px; }
+.attach { display: grid; gap: 6px; }
+.attach-list { display: flex; flex-wrap: wrap; gap: 6px; }
+.attach-list:empty { display: none; }
+.file-chip { display: inline-flex; align-items: center; gap: 6px; max-width: 100%; padding: 3px 4px 3px 9px; border-radius: 999px; background: var(--soft);
+  font-size: 12px; font-weight: 600; color: var(--ink2); }
+.file-chip span { overflow: hidden; text-overflow: ellipsis; white-space: nowrap; max-width: 190px; }
+.file-chip button { border: 0; background: transparent; color: var(--muted); width: 20px; height: 20px; border-radius: 50%; }
+.file-chip button:hover { background: var(--disagree-bg); color: var(--disagree); }
+.library { padding: 12px 14px; display: grid; gap: 8px; }
+.lib-path { font-family: var(--mono); font-size: 11.5px; color: var(--ink2); word-break: break-all; background: #fdfbf7; border: 1px solid var(--line); border-radius: 8px; padding: 6px 8px; }
+.lib-actions, .run-actions { display: flex; flex-wrap: wrap; gap: 6px; }
+.run-actions .btn.small { display: inline-flex; align-items: center; gap: 5px; }
+.attached { font-size: 12.5px; color: var(--muted); }
 .side-foot .hint { flex: 1; }
 
 /* pills */
@@ -264,6 +280,11 @@ details.round > .note:last-child { margin-bottom: 16px; }
       <label class="field">What should they debate?
         <textarea id="task" placeholder="e.g. Should a two-person startup build its MVP as a monolith or microservices?"></textarea>
       </label>
+      <div class="attach">
+        <input type="file" id="attach-input" multiple accept=".pdf,.png,.jpg,.jpeg,.webp,.gif,.txt,.md,.csv" hidden>
+        <button class="link-btn" id="attach-btn" type="button">📎 Attach PDFs or images</button>
+        <div class="attach-list" id="attach-list"></div>
+      </div>
       <div class="field">Seats
         <div class="seats" id="seats"></div>
         <button class="link-btn" id="add-seat" type="button">⟳ Scan for CLIs</button>
@@ -287,6 +308,16 @@ details.round > .note:last-child { margin-bottom: 16px; }
     <div class="eyebrow">Debates</div>
     <div class="runs" id="runs"><p class="hint">Loading…</p></div>
 
+    <div class="eyebrow">Saved debates</div>
+    <div class="library card">
+      <p class="hint">Each finished debate is saved here as <b>report.pdf</b> (final answer), <b>report.html</b> (with every round) and <b>debate.json</b> (to reopen or rerun it).</p>
+      <div class="lib-path" id="lib-path">…</div>
+      <div class="lib-actions">
+        <button class="btn ghost small" id="lib-change" type="button">Change folder…</button>
+        <button class="btn ghost small" id="lib-open" type="button">Open folder</button>
+      </div>
+    </div>
+
     <div class="side-foot">
       <p class="hint">Runs only on this computer. Nothing runs once you quit.</p>
       <button class="btn ghost small" id="quit">Quit</button>
@@ -301,13 +332,20 @@ details.round > .note:last-child { margin-bottom: 16px; }
   "use strict";
   var token = (new URLSearchParams(location.hash.slice(1))).get("t") || "";
   var PALETTE = ["#3d5bd9", "#0c8599", "#2f7d4a", "#ae3ec9", "#c2255c", "#e8590c"];
-  var THEMES = {
-    claude: { name: "Claude", color: "#D97757", soft: "#fbeae2", glyph: "✻" },
-    codex: { name: "ChatGPT · Codex", color: "#1f1f1f", soft: "#e9e8e6", knot: true, tile: "#141414" },
-    antigravity: { name: "Gemini · Antigravity", color: "#7b6fd8", soft: "#ecebfb", glyph: "✦", gradient: ["#4285F4", "#9B72CB", "#D96570"] },
-    gemini: { name: "Gemini CLI", color: "#7b6fd8", soft: "#ecebfb", glyph: "✦", gradient: ["#4285F4", "#9B72CB", "#D96570"] }
-  };
-  var state = { config: null, runs: [], selected: null, cache: {}, pollTimer: null, closed: false };
+  // Shared seat themes (src/ui/themes.ts), injected by the server: same marks as reports and icons.
+  var SEAT_THEMES = /*SEAT_THEMES*/[];
+  function themeForSeat(model, cli) {
+    var m = String(model || "").toLowerCase();
+    for (var i = 0; m && i < SEAT_THEMES.length; i++) {
+      if (SEAT_THEMES[i].models && new RegExp(SEAT_THEMES[i].models).test(m)) return SEAT_THEMES[i];
+    }
+    var c = String(cli || "").toLowerCase();
+    for (var j = 0; j < SEAT_THEMES.length; j++) {
+      if ((SEAT_THEMES[j].clis || []).indexOf(c) >= 0) return SEAT_THEMES[j];
+    }
+    return null;
+  }
+  var state = { config: null, runs: [], selected: null, cache: {}, pollTimer: null, closed: false, attachments: [] };
 
   function api(path, opts) {
     opts = opts || {};
@@ -356,9 +394,13 @@ details.round > .note:last-child { margin-bottom: 16px; }
   function agentInfo(id) {
     return state.config ? state.config.agents.filter(function (a) { return a.id === id; })[0] : null;
   }
+  // A seat's catalog key: its cliType, or for "text" seats the command it runs (e.g. "ollama").
+  function seatKey(a) { return a.cliType === "text" ? (a.command || "text") : a.cliType; }
   function themeFor(id) {
     var a = agentInfo(id);
-    if (a && THEMES[a.cliType]) return THEMES[a.cliType];
+    var picked = state.pickers && state.pickers[id] ? state.pickers[id].model.value : null;
+    var t = a ? themeForSeat(picked || a.model, seatKey(a)) : null;
+    if (t) return t;
     var ids = state.config ? state.config.agents.map(function (x) { return x.id; }) : [];
     var idx = Math.max(0, ids.indexOf(id));
     var color = PALETTE[idx % PALETTE.length];
@@ -412,7 +454,7 @@ details.round > .note:last-child { margin-bottom: 16px; }
     if (state.scanning) return state.scanning;
     state.scanning = api("/api/clis?list=1").then(function (data) {
       state.clis = {};
-      data.clis.forEach(function (c) { state.clis[c.cliType] = c; });
+      data.clis.forEach(function (c) { state.clis[c.id] = c; });
       state.clisList = data.clis;
       renderSeats();
       return data;
@@ -421,12 +463,12 @@ details.round > .note:last-child { margin-bottom: 16px; }
     return state.scanning;
   }
   function modelOptionsFor(a) {
-    var cli = state.clis && state.clis[a.cliType];
+    var cli = state.clis && state.clis[seatKey(a)];
     var models = [a.model].concat(cli ? cli.models : []);
     return models.filter(function (m, i) { return m && models.indexOf(m) === i; });
   }
   function effortOptionsFor(a, model) {
-    var cli = state.clis && state.clis[a.cliType];
+    var cli = state.clis && state.clis[seatKey(a)];
     if (!cli) return [];
     var byModel = cli.effortsByModel && cli.effortsByModel[model];
     return byModel && byModel.length ? byModel : (cli.efforts || []);
@@ -458,7 +500,7 @@ details.round > .note:last-child { margin-bottom: 16px; }
     }
     cfg.agents.forEach(function (a) {
       var saved = storeGet("argue.seat." + a.id) || {};
-      var cli = state.clis && state.clis[a.cliType];
+      var cli = state.clis && state.clis[seatKey(a)];
       var cb = h("input", { type: "checkbox", value: a.id });
       cb.checked = a.id in prevChecked ? prevChecked[a.id] : cfg.defaults.agents.indexOf(a.id) >= 0;
       var models = modelOptionsFor(a);
@@ -515,17 +557,76 @@ details.round > .note:last-child { margin-bottom: 16px; }
       if (p) settings[id] = { model: p.model.value, effort: p.effort.style.display === "none" ? "" : p.effort.value };
     });
     showFormError("");
-    btn.disabled = true; btn.textContent = "Starting…";
-    api("/api/runs", { method: "POST", body: {
-      task: task, agents: agents, settings: settings,
-      maxRounds: Number(document.getElementById("rounds").value),
-      threshold: Number(document.getElementById("threshold").value)
-    } }).then(function (res) {
+    btn.disabled = true; btn.textContent = state.attachments.length ? "Uploading files…" : "Starting…";
+    readAttachments().then(function (files) {
+      btn.textContent = "Starting…";
+      return api("/api/runs", { method: "POST", body: {
+        task: task, agents: agents, settings: settings, attachments: files,
+        maxRounds: Number(document.getElementById("rounds").value),
+        threshold: Number(document.getElementById("threshold").value)
+      } });
+    }).then(function (res) {
       document.getElementById("task").value = "";
+      state.attachments = []; renderAttachments();
       return refreshRuns().then(function () { select(res.requestId); });
     }).catch(function (e) { showFormError(e.message); })
       .then(function () { btn.disabled = false; btn.textContent = "Start debate"; });
   });
+
+  // ---------- attachments (PDFs, images, text) ----------
+  var MAX_FILES = 10, MAX_FILE_BYTES = 25 * 1024 * 1024;
+  document.getElementById("attach-btn").addEventListener("click", function () { document.getElementById("attach-input").click(); });
+  document.getElementById("attach-input").addEventListener("change", function () {
+    var input = this;
+    [].slice.call(input.files || []).forEach(function (file) {
+      if (state.attachments.length >= MAX_FILES) return showFormError("Attach at most " + MAX_FILES + " files.");
+      if (file.size > MAX_FILE_BYTES) return showFormError(file.name + " is larger than 25 MB.");
+      state.attachments.push(file);
+    });
+    input.value = "";
+    renderAttachments();
+  });
+  function renderAttachments() {
+    var box = document.getElementById("attach-list");
+    box.textContent = "";
+    state.attachments.forEach(function (file, i) {
+      box.appendChild(h("span", { class: "file-chip", title: file.name },
+        h("span", { text: (/\.pdf$/i.test(file.name) ? "📄 " : /\.(png|jpe?g|webp|gif)$/i.test(file.name) ? "🖼 " : "📝 ") + file.name }),
+        h("button", { type: "button", "aria-label": "Remove " + file.name, onclick: function () { state.attachments.splice(i, 1); renderAttachments(); } }, "×")));
+    });
+  }
+  // Files go up as base64 in the start request and are saved next to the run, on this computer.
+  function readAttachments() {
+    return Promise.all(state.attachments.map(function (file) {
+      return new Promise(function (resolve, reject) {
+        var reader = new FileReader();
+        reader.onload = function () { var url = String(reader.result); resolve({ name: file.name, data: url.slice(url.indexOf(",") + 1) }); };
+        reader.onerror = function () { reject(new Error("Could not read " + file.name)); };
+        reader.readAsDataURL(file);
+      });
+    }));
+  }
+
+  // ---------- library (where finished debates are saved) ----------
+  function loadLibrary() {
+    return api("/api/library").then(function (lib) {
+      var el = document.getElementById("lib-path");
+      el.textContent = lib.dir; el.title = lib.dir + (lib.pdf ? "" : "  (no Edge/Chrome found: PDFs are skipped; open report.html and print it)");
+    }).catch(function () {});
+  }
+  document.getElementById("lib-change").addEventListener("click", function () {
+    var btn = this; btn.disabled = true; btn.textContent = "Choose in the dialog…";
+    api("/api/library/choose", { method: "POST" }).then(function (res) {
+      if (res.cancelled) return;
+      return loadLibrary();
+    }).catch(function () {
+      // No native dialog available: let the user type a path instead.
+      var typed = prompt("Folder for saved debates (full path):", document.getElementById("lib-path").textContent || "");
+      if (!typed) return;
+      return api("/api/library/dir", { method: "POST", body: { dir: typed } }).then(loadLibrary).catch(function (e) { alert(e.message); });
+    }).then(function () { btn.disabled = false; btn.textContent = "Change folder…"; });
+  });
+  document.getElementById("lib-open").addEventListener("click", function () { api("/api/library/open", { method: "POST" }).catch(function (e) { alert(e.message); }); });
 
   // ---------- scan for CLIs / connect one ----------
   function seatNameFor(cliType) {
@@ -534,6 +635,12 @@ details.round > .note:last-child { margin-bottom: 16px; }
     var name = base; var n = 2;
     while (taken.indexOf(name) >= 0) name = base + "-" + n++;
     return name;
+  }
+  // Catalog presets send only their id; the server fills in the preset's safe flags itself.
+  function presetBody(cli, id, model) {
+    var body = cli.cliType === "text" && cli.id ? { id: id, preset: cli.id, model: model } : { id: id, cliType: cli.cliType, model: model };
+    if (cli.path) body.command = cli.path;
+    return body;
   }
   function addSeat(body) {
     return api("/api/seats", { method: "POST", body: body }).then(function () { return loadConfig().then(loadUsage); });
@@ -579,7 +686,7 @@ details.round > .note:last-child { margin-bottom: 16px; }
       (cli.models || []).forEach(function (m) { modelList.appendChild(h("option", { value: m })); });
       modelInput.value = (cli.models && cli.models[0]) || "";
       modelInput.placeholder = cli.modelHint || "model id";
-      if (!nameInput.value || nameInput.dataset.auto) { nameInput.value = seatNameFor(cli.cliType); nameInput.dataset.auto = "1"; }
+      if (!nameInput.value || nameInput.dataset.auto) { nameInput.value = seatNameFor(cli.cliType === "text" && cli.id ? cli.id : cli.cliType); nameInput.dataset.auto = "1"; }
       save.disabled = false;
     }
     nameInput.addEventListener("input", function () { delete nameInput.dataset.auto; });
@@ -589,21 +696,23 @@ details.round > .note:last-child { margin-bottom: 16px; }
       var installed = data.clis.filter(function (c) { return c.installed; });
       if (!installed.length) list.appendChild(h("p", { class: "hint", text: "No known AI CLIs found. Install one below, or use Other CLI for any command-line AI." }));
       installed.forEach(function (cli) {
-        var t = THEMES[cli.cliType] || { glyph: cli.label[0], color: "#555", soft: "#eee" };
-        var seated = state.config.agents.filter(function (a) { return a.cliType === cli.cliType; }).map(function (a) { return a.id; });
+        var t = themeForSeat(cli.models && cli.models[0], cli.id) || { glyph: cli.label[0], color: "#555", soft: "#eee" };
+        var seated = state.config.agents.filter(function (a) { return seatKey(a) === cli.id; }).map(function (a) { return a.id; });
         var quick = h("button", { class: "btn small pick", type: "button" }, seated.length ? "Add another" : "Add");
         quick.addEventListener("click", function (ev) {
           ev.stopPropagation();
           quick.disabled = true; quick.textContent = "Adding…";
-          var body = { id: seatNameFor(cli.cliType), cliType: cli.cliType, model: (cli.models && cli.models[0]) || "default" };
-          if (cli.path) body.command = cli.path;
+          if (cli.unrestricted && !confirm(cli.label + ": " + cli.unrestricted + " Add it anyway?")) { quick.disabled = false; quick.textContent = "Add"; return; }
+          var body = presetBody(cli, seatNameFor(cli.cliType === "text" ? cli.id : cli.cliType), (cli.models && cli.models[0]) || "default");
           addSeat(body).then(function () { draw(state.lastScan); }).catch(function (e) { err.hidden = false; err.textContent = e.message; quick.disabled = false; quick.textContent = "Add"; });
         });
         var b = h("div", { class: "cli-opt", role: "button", tabindex: "0" },
           markTheme(t),
           h("span", { style: "min-width:0" }, cli.label,
             h("small", { text: (cli.models.length ? cli.models.length + " models" : "models: " + (cli.modelHint || "type one in")) + (seated.length ? " · seated as " + seated.join(", ") : "") })),
-          cli.note ? h("span", { class: "pill revise", title: cli.note, text: "note" }) : null,
+          cli.unrestricted ? h("span", { class: "pill disagree", title: cli.unrestricted, text: "can act on its own" }) :
+            cli.note ? h("span", { class: "pill revise", title: cli.note, text: "note" }) : null,
+          cli.unverified ? h("span", { class: "pill", title: "Set up from this CLI's documentation; argue has not run it on a real install yet. If it fails, check its --help.", text: "untested" }) : null,
           quick);
         b.addEventListener("click", function () { pick(cli, b); });
         list.appendChild(b);
@@ -629,9 +738,9 @@ details.round > .note:last-child { margin-bottom: 16px; }
     save.addEventListener("click", function () {
       if (!chosen) return;
       err.hidden = true;
-      var body = { id: nameInput.value.trim(), cliType: chosen.cliType, model: modelInput.value.trim() };
-      if (chosen.path) body.command = chosen.path;
-      if (chosen.cliType === "text") {
+      if (chosen.unrestricted && !confirm(chosen.label + ": " + chosen.unrestricted + " Add it anyway?")) return;
+      var body = presetBody(chosen, nameInput.value.trim(), modelInput.value.trim());
+      if (chosen.cliType === "text" && !chosen.id) {
         body.command = cmdInput.value.trim();
         body.args = argsInput.value.trim() ? argsInput.value.trim().split(/\s+/) : [];
       }
@@ -684,10 +793,17 @@ details.round > .note:last-child { margin-bottom: 16px; }
       // A seat just answered: its plan usage changed, so refresh the rings now.
       if (refreshUsage && c.events.length > data.events.length) loadUsage();
       c.result = data.result; c.error = data.error; c.process = data.process;
+      c.saved = data.saved; c.attachments = data.attachments || [];
       c.model = buildModel(c.events, c.result);
       render();
       if (!isDone(c)) state.pollTimer = setTimeout(poll, 1500);
-      else { refreshRuns(); loadUsage(); }
+      else {
+        refreshRuns(); loadUsage();
+        // The desk saves a finished debate to the library a moment after it ends; pick that up.
+        if (c.result && !c.saved && c.process && c.process.exitCode === 0 && (c.saveChecks = (c.saveChecks || 0) + 1) <= 6) {
+          state.pollTimer = setTimeout(poll, 2500);
+        }
+      }
     }).catch(function () { if (!state.closed) state.pollTimer = setTimeout(poll, 3000); });
   }
   function isDone(c) {
@@ -738,6 +854,27 @@ details.round > .note:last-child { margin-bottom: 16px; }
         case "Failed": m.failed = p; break;
       }
     });
+    // A saved debate reopened from the library has no event log: rebuild the rounds from result.json.
+    if (!events.length && result && Array.isArray(result.rounds)) {
+      m.participants = (result.scoreboard || []).map(function (s) { return s.participantId; });
+      result.rounds.forEach(function (rd) {
+        var outs = rd.outputs || [];
+        var r = { round: rd.round, phase: outs[0] ? outs[0].phase : "debate", participants: outs.map(function (o) { return o.participantId; }),
+          responses: {}, completed: null, merges: (rd.appliedMerges || []).map(function (mg) { return { from: mg.sourceClaimId, into: mg.targetClaimId }; }) };
+        outs.forEach(function (o) {
+          r.responses[o.participantId] = { summary: o.summary, fullResponse: o.fullResponse, extractedClaimsDetail: o.extractedClaims || [],
+            judgementsDetail: o.judgements || [], claimVotesDetail: o.claimVotes || [] };
+          (o.extractedClaims || []).forEach(function (claim, i) {
+            var id = o.participantId + ":" + rd.round + ":" + i;
+            m.claims[id] = { id: id, title: claim.title, statement: claim.statement, category: claim.category, by: o.participantId, round: rd.round };
+          });
+        });
+        m.rounds[rd.round] = r;
+        m.roundOrder.push(rd.round);
+        r.merges.forEach(function (mg) { m.merges.push(mg); });
+      });
+      m.finalized = { status: result.status };
+    }
     if (result && result.task) m.task = result.task.prompt;
     if (result && result.finalClaims) result.finalClaims.forEach(function (fc) {
       var existing = m.claims[fc.claimId] || {};
@@ -782,7 +919,9 @@ details.round > .note:last-child { margin-bottom: 16px; }
         m.participants.map(function (id) { return h("span", { class: "chip" }, mark(id), id, m.eliminated[id] ? " (out)" : ""); }),
         result && result.metrics ? h("span", { text: fmtElapsed(result.metrics.elapsedMs) + " · " + result.metrics.totalRounds + " rounds" }) : null,
         h("span", { class: "mono", text: fmtWhen(state.selected) })),
-      running ? h("div", null, h("button", { class: "btn danger small", onclick: stopRun }, "Stop debate")) : null
+      c.attachments && c.attachments.length ? h("div", { class: "attached", text: "📎 " + c.attachments.join(", ") }) : null,
+      running ? h("div", null, h("button", { class: "btn danger small", onclick: stopRun }, "Stop debate")) : null,
+      result ? renderRunActions(c, result) : null
     ));
 
     if (result) main.appendChild(renderVerdict(result, m, openDetails));
@@ -807,6 +946,38 @@ details.round > .note:last-child { margin-bottom: 16px; }
     if (m.report && !result) tl.appendChild(h("p", { class: "waiting" }, h("span", { class: "dot" }), m.report.reporterId + " is writing the final report…"));
     main.appendChild(tl);
     window.scrollTo(0, scrollY);
+  }
+
+  // Saved-debate actions: open the PDF / report / folder with the OS, save now, or run it again.
+  function renderRunActions(c, result) {
+    var id = state.selected;
+    function open(what) { api("/api/runs/" + encodeURIComponent(id) + "/open", { method: "POST", body: { what: what } }).catch(function (e) { alert(e.message); }); }
+    var bar = h("div", { class: "run-actions" });
+    if (c.saved) {
+      if (c.saved.hasPdf) bar.appendChild(h("button", { class: "btn ghost small", onclick: function () { open("pdf"); } }, "📄 Open PDF"));
+      bar.appendChild(h("button", { class: "btn ghost small", onclick: function () { open("html"); } }, "🌐 Open report"));
+      bar.appendChild(h("button", { class: "btn ghost small", onclick: function () { open("folder"); } }, "📁 Show in folder"));
+    } else {
+      var save = h("button", { class: "btn ghost small" }, "💾 Save to library");
+      save.addEventListener("click", function () {
+        save.disabled = true; save.textContent = "Saving…";
+        api("/api/runs/" + encodeURIComponent(id) + "/save", { method: "POST" }).then(function () { c.saveChecks = 0; poll(); })
+          .catch(function (e) { alert(e.message); save.disabled = false; save.textContent = "💾 Save to library"; });
+      });
+      bar.appendChild(save);
+    }
+    bar.appendChild(h("button", { class: "btn ghost small", onclick: function () { runAgain(result); } }, "↻ Run again"));
+    return bar;
+  }
+  // Puts the same question and seats back in the form so the debate can be rerun or tweaked.
+  function runAgain(result) {
+    var prompt = result.task && result.task.prompt ? result.task.prompt : "";
+    document.getElementById("task").value = prompt.replace(/\n\nAttached files \(read them as part of the task\):[\s\S]*$/, "");
+    var ids = (result.scoreboard || []).map(function (s) { return s.participantId; });
+    [].forEach.call(document.querySelectorAll("#seats input[type=checkbox]"), function (cb) { cb.checked = ids.indexOf(cb.value) >= 0; });
+    var aside = document.querySelector("aside"); if (aside) aside.scrollTop = 0;
+    document.getElementById("task").focus();
+    showFormError(ids.some(function (sid) { return !agentInfo(sid); }) ? "Some seats from that debate are no longer set up; pick others." : "");
   }
 
   function setAllRounds(open) {
@@ -995,7 +1166,7 @@ details.round > .note:last-child { margin-bottom: 16px; }
   // Pods are created once and then updated in place, so the ring animates from its last value.
   var pods = {};
   function buildPod(seat) {
-    var t = THEMES[seat.cliType] || { name: seat.cliType, color: "#555", soft: "#e8e8e8", glyph: "●" };
+    var t = themeForSeat(null, seat.cliType) || { name: seat.cliType, color: "#555", soft: "#e8e8e8", glyph: "●" };
     var gid = "g-" + seat.cliType;
     var defs = t.gradient ? svg("defs", {}, svg("linearGradient", { id: gid, x1: "0", y1: "0", x2: "1", y2: "1" },
       svg("stop", { offset: "0", "stop-color": t.gradient[0] }), svg("stop", { offset: ".55", "stop-color": t.gradient[1] }), svg("stop", { offset: "1", "stop-color": t.gradient[2] }))) : null;
@@ -1100,7 +1271,7 @@ details.round > .note:last-child { margin-bottom: 16px; }
     document.getElementById("main").textContent = "Missing access token. Open the desk from its shortcut or the link printed by argue ui.";
     return;
   }
-  loadConfig().then(function () { loadUsage(); scanClis().catch(function () {}); return refreshRuns(); }).then(function () { if (state.runs[0]) select(state.runs[0].requestId); });
+  loadConfig().then(function () { loadUsage(); loadLibrary(); scanClis().catch(function () {}); return refreshRuns(); }).then(function () { if (state.runs[0]) select(state.runs[0].requestId); });
   setInterval(function () { if (!state.closed) refreshRuns(); }, 5000);
   setInterval(loadUsage, 30000);
 })();

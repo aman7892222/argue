@@ -191,6 +191,11 @@ const CliConfigSchemaBase = z
     schemaVersion: z.literal(1),
     output: OutputSchema.optional(),
     viewer: ViewerConfigSchema.optional(),
+    /** Where the debate desk saves finished debates (report.pdf / report.html / debate.json). */
+    library: z
+      .object({ dir: z.string().min(1) })
+      .strict()
+      .optional(),
     defaults: DefaultsSchema.optional(),
     providers: z.record(ProviderSchema).refine((providers) => Object.keys(providers).length > 0, {
       message: "config.providers must contain at least one provider"

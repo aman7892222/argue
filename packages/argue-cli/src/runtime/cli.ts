@@ -1,6 +1,6 @@
 import { randomUUID } from "node:crypto";
 import { tmpdir } from "node:os";
-import { join } from "node:path";
+import { dirname, join } from "node:path";
 // cross-spawn resolves Windows `.cmd` shims (npm-installed CLIs) and shebang scripts,
 // escaping args for cmd.exe; on other platforms it delegates to child_process.spawn.
 import spawn from "cross-spawn";
@@ -73,6 +73,11 @@ export function createCliRunner(raw: CliProviderConfig): ProviderTaskRunner {
             : {})
         },
         stdin: promptInArgs ? "" : buildStdin(provider.cliType, prompt),
+        // Restricted Claude can only read inside its working dirs, so start it in the attachments folder.
+        cwd:
+          provider.cliType === "claude" && (provider.permissionMode ?? "safe") === "safe"
+            ? attachmentDirs(debateAttachments())[0]
+            : undefined,
         abortSignal
       });
 
@@ -196,6 +201,22 @@ function usesStdinPrompt(cliType: CliProviderConfig["cliType"]): boolean {
   }
 }
 
+const IMAGE_FILE = /\.(png|jpe?g|webp|gif)$/i;
+
+/** Files attached to this debate (`argue run --attach`), as absolute paths. */
+export function debateAttachments(env: NodeJS.ProcessEnv = process.env): string[] {
+  try {
+    const parsed = JSON.parse(env.ARGUE_ATTACHMENTS ?? "[]") as unknown;
+    return Array.isArray(parsed) ? parsed.filter((p): p is string => typeof p === "string") : [];
+  } catch {
+    return [];
+  }
+}
+
+function attachmentDirs(files: string[]): string[] {
+  return [...new Set(files.map((file) => dirname(file)))];
+}
+
 const CODEX_PERMISSION_FLAGS = new Set([
   "-s",
   "--sandbox",
@@ -222,8 +243,22 @@ function buildBaseArgs(
     case "claude": {
       // stream-json (which requires --verbose) also reports plan rate limits; see parseClaudeStream.
       const output = ["--output-format", "stream-json", "--verbose"];
-      // Safe: no built-in tools, no MCP servers from the user's settings, no skills.
-      const lockdown = auto ? [] : ["--tools", "", "--strict-mcp-config", "--disable-slash-commands"];
+      // Safe: restricted mode (no command-running tools, user/project settings ignored, file tools
+      // confined to the working dirs), no MCP servers, no skills, and no tools at all, except Read
+      // when the debate has attachments; the runner then starts Claude inside the attachments folder.
+      const attachments = debateAttachments();
+      const lockdown = auto
+        ? []
+        : [
+            "--restricted",
+            "--tools",
+            attachments.length ? "Read" : "",
+            ...attachmentDirs(attachments)
+              .slice(1)
+              .flatMap((dir) => ["--add-dir", dir]),
+            "--strict-mcp-config",
+            "--disable-slash-commands"
+          ];
       const args =
         sessionUUID && isResume
           ? ["--print", "--model", providerModel, ...output, ...lockdown, "--resume", sessionUUID]
@@ -257,6 +292,10 @@ function buildBaseArgs(
           providerModel,
           ...reasoningArgs,
           ...sandboxArgs,
+          // Images go straight to the model; other files are listed in the task for it to read.
+          ...debateAttachments()
+            .filter((file) => IMAGE_FILE.test(file))
+            .flatMap((file) => ["-i", file]),
           "--color",
           "never",
           "--skip-git-repo-check"
@@ -279,6 +318,7 @@ function buildBaseArgs(
           "stream-json",
           "--model",
           providerModel,
+          ...attachmentDirs(debateAttachments()).flatMap((dir) => ["--add-dir", dir]),
           ...(auto ? ["--dangerously-skip-permissions"] : [])
         ],
         reasoningApplied: false
@@ -368,13 +408,15 @@ async function runCommand(args: {
   args: string[];
   env: Record<string, string | undefined>;
   stdin: string;
+  cwd?: string;
   abortSignal?: AbortSignal;
 }): Promise<{ stdout: string; stderr: string }> {
   return new Promise((resolve, reject) => {
     const child = spawn(args.command, args.args, {
       env: args.env,
       stdio: "pipe",
-      signal: args.abortSignal
+      signal: args.abortSignal,
+      ...(args.cwd ? { cwd: args.cwd } : {})
     });
     const { stdout: out, stderr: err, stdin: input } = child;
     if (!out || !err || !input) {

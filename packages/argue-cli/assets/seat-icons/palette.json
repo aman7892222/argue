@@ -1,0 +1,166 @@
+[
+  {
+    "id": "claude",
+    "name": "Claude",
+    "color": "#D97757",
+    "soft": "#fbeae2",
+    "glyph": "✻",
+    "models": "claude|opus|sonnet|haiku|fable",
+    "clis": ["claude"]
+  },
+  {
+    "id": "chatgpt",
+    "name": "ChatGPT",
+    "color": "#1f1f1f",
+    "soft": "#e9e8e6",
+    "mark": "knot",
+    "tile": "#141414",
+    "models": "^gpt|^o[1-9]|codex|chatgpt",
+    "clis": ["codex"]
+  },
+  {
+    "id": "gemini",
+    "name": "Gemini",
+    "color": "#7b6fd8",
+    "soft": "#ecebfb",
+    "glyph": "✦",
+    "gradient": ["#4285F4", "#9B72CB", "#D96570"],
+    "models": "gemini|gemma",
+    "clis": ["antigravity", "gemini"]
+  },
+  {
+    "id": "meta",
+    "name": "Meta Llama",
+    "color": "#0866FF",
+    "soft": "#e3eeff",
+    "glyph": "∞",
+    "models": "llama|meta"
+  },
+  {
+    "id": "mistral",
+    "name": "Mistral",
+    "color": "#FA520F",
+    "soft": "#fff0e6",
+    "glyph": "▚",
+    "gradient": ["#FFD800", "#FF8205", "#FA500F", "#E10500"],
+    "models": "mistral|mixtral|codestral|devstral|magistral|ministral|pixtral",
+    "clis": ["vibe"]
+  },
+  {
+    "id": "qwen",
+    "name": "Qwen",
+    "color": "#615CED",
+    "soft": "#ecebfd",
+    "glyph": "◈",
+    "models": "qwen|qwq",
+    "clis": ["qwen"]
+  },
+  {
+    "id": "deepseek",
+    "name": "DeepSeek",
+    "color": "#4D6BFE",
+    "soft": "#e7ecff",
+    "glyph": "◗",
+    "models": "deepseek"
+  },
+  {
+    "id": "grok",
+    "name": "Grok",
+    "color": "#2b2b2b",
+    "soft": "#ececec",
+    "glyph": "⨯",
+    "tile": "#111111",
+    "models": "grok"
+  },
+  {
+    "id": "kimi",
+    "name": "Kimi",
+    "color": "#1f2937",
+    "soft": "#e8eaee",
+    "glyph": "☾",
+    "tile": "#111827",
+    "models": "kimi|moonshot",
+    "clis": ["kimi"]
+  },
+  {
+    "id": "copilot",
+    "name": "GitHub Copilot",
+    "color": "#8250DF",
+    "soft": "#efe9fb",
+    "glyph": "◉",
+    "clis": ["copilot"]
+  },
+  {
+    "id": "cursor",
+    "name": "Cursor",
+    "color": "#2d2d2d",
+    "soft": "#ebebeb",
+    "glyph": "⬢",
+    "tile": "#111111",
+    "clis": ["cursor-agent", "agent"]
+  },
+  {
+    "id": "ollama",
+    "name": "Ollama",
+    "color": "#3a3a3a",
+    "soft": "#ededed",
+    "glyph": "◔",
+    "clis": ["ollama"]
+  },
+  {
+    "id": "goose",
+    "name": "Goose",
+    "color": "#2f3b4a",
+    "soft": "#e8ebef",
+    "glyph": "◒",
+    "clis": ["goose"]
+  },
+  {
+    "id": "aider",
+    "name": "Aider",
+    "color": "#14A33C",
+    "soft": "#e4f5e9",
+    "glyph": "✎",
+    "clis": ["aider"]
+  },
+  {
+    "id": "llm",
+    "name": "llm",
+    "color": "#5b6573",
+    "soft": "#eceef1",
+    "glyph": "›",
+    "clis": ["llm"]
+  },
+  {
+    "id": "opencode",
+    "name": "opencode",
+    "color": "#3b3b3b",
+    "soft": "#ececec",
+    "glyph": "▣",
+    "clis": ["opencode"]
+  },
+  {
+    "id": "amp",
+    "name": "Amp",
+    "color": "#E5484D",
+    "soft": "#fde8e8",
+    "glyph": "ϟ",
+    "clis": ["amp"]
+  },
+  {
+    "id": "droid",
+    "name": "Factory droid",
+    "color": "#e05d2a",
+    "soft": "#fdebe3",
+    "glyph": "◇",
+    "clis": ["droid"]
+  },
+  {
+    "id": "pi",
+    "name": "pi",
+    "color": "#0f766e",
+    "soft": "#e0f2f0",
+    "glyph": "π",
+    "clis": ["pi"]
+  }
+]

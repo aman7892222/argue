@@ -6,6 +6,7 @@ Fork of [onevcat/argue](https://github.com/onevcat/argue) by aman7892222. Headli
 
 ### Security
 
+- Claude seats also run with `--restricted` (no command-running tools, user and project settings ignored, file tools confined to the working directories). The desk validates uploads (type, size, safe basename, never overwrites), only opens files inside a saved debate's library folder, and git-ignores `debates/`.
 - **Safe permissions by default.** New provider option `permissionMode: "safe" | "auto"` (also `config add-provider --permission-mode`). Safe, the default, drops every auto-approve flag inherited from upstream: Gemini CLI `--approval-mode yolo` becomes read-only `plan`, and Copilot `--yolo`, opencode `--dangerously-skip-permissions`, Amp `--dangerously-allow-all` and droid `--auto high` are dropped. Codex stays in its read-only sandbox, and Claude runs with `--tools "" --strict-mcp-config --disable-slash-commands`, so it has no tools, MCP servers or skills. `auto` restores each CLI's own approval flags for `--action` work.
 - Debate desk API: constant-time token comparison, and requests whose `Origin` isn't the desk's own page are rejected.
 - `.gitignore` now covers `argue.config.json`, `out/`, `.argue/` and `*.events.jsonl`, so local configs and debate transcripts can't be committed by accident.
@@ -13,6 +14,12 @@ Fork of [onevcat/argue](https://github.com/onevcat/argue) by aman7892222. Headli
 
 ### Features
 
+- **Debate library.** Every finished desk debate is saved to a folder you pick (default `debates/` next to the config; **Change folder…** opens a native folder dialog) as `report.pdf` (final output, rendered by Edge or Chrome headless with a throwaway profile), `report.html` (standalone, offline, every round folded, with a Print / Save as PDF button) and `debate.json` (to reopen or rerun it). Folders are named after the debate date and title. The desk lists saved debates even after `out/` is gone, rebuilds their rounds from `debate.json`, and adds **Open PDF**, **Open report**, **Show in folder**, **Save to library** and **Run again**.
+- **Attachments.** Attach PDFs, images and text files to a debate (desk upload, or `argue run --attach <file>`, up to 10 files of 25 MB each). Claude seats get a `Read` tool confined to the attachments folder (`--restricted`), Codex gets images with `-i`, Antigravity gets `--add-dir`, and every seat sees the file list in the task.
+- **More CLIs.** Presets for Ollama (local Llama, Mistral, Qwen, DeepSeek and Gemma), llm, Qwen Code (read-only `plan` mode), Aider (ask mode), Cursor Agent (propose-only), Goose (chat mode, no tools), Kimi and Mistral Vibe. Kimi and Vibe are flagged as "can act on its own" because they auto-approve their tools. Preset flags always come from the server catalog, never from the request.
+- **Shared seat icon set.** `src/ui/themes.ts` is the single source of seat marks and colors for 19 families and CLIs (Claude, ChatGPT, Gemini, Meta Llama, Mistral, Qwen, DeepSeek, Grok, Kimi, Copilot, Cursor, Ollama and more). Seats are themed by model family first, then by CLI. `scripts/export-seat-icons.mjs` writes reusable SVGs and `palette.json` to `packages/argue-cli/assets/seat-icons/`.
+- Reports render light Markdown (headings, bold, lists, code) from escaped text.
+- README: a step-by-step install guide for first-time GitHub users.
 - Debate desk: ChatGPT's seat theme now matches its app icon, a monochrome knot (white on a dark tile in chips, charcoal on its ring).
 - Debate desk: per-seat **model and effort pickers** for each debate, filled from each CLI's catalog: every Antigravity model (Argon low, medium and high, and more), Codex models with their own reasoning levels, and Claude's opus, sonnet, haiku and fable with low to max effort. Picks are remembered in the browser.
 - `argue run --model-for <agent>=<model>` and `--effort-for <agent>=<level>` (repeatable) override a seat for one run without editing the config.

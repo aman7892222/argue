@@ -8,6 +8,71 @@ argue is a structured multi-agent debate engine. Multiple AI agents analyze the 
 
 Give it a question. Get back claims that survived cross-examination, votes that quantify agreement, and a representative report backed by peer-reviewed scoring. Less hallucination, more rigor.
 
+## This fork: the debate desk
+
+This fork adds a **debate desk**, a local web page where Claude, ChatGPT, Gemini and other AI command-line tools (CLIs) debate a question. You can watch every round, read each AI's reasoning, and keep every result as a PDF. Everything runs on your own computer, with your own logins.
+
+<p>
+<img src="packages/argue-cli/assets/seat-icons/claude.svg" width="40" alt="Claude">
+<img src="packages/argue-cli/assets/seat-icons/chatgpt.svg" width="40" alt="ChatGPT">
+<img src="packages/argue-cli/assets/seat-icons/gemini.svg" width="40" alt="Gemini">
+<img src="packages/argue-cli/assets/seat-icons/meta.svg" width="40" alt="Meta Llama">
+<img src="packages/argue-cli/assets/seat-icons/mistral.svg" width="40" alt="Mistral">
+<img src="packages/argue-cli/assets/seat-icons/qwen.svg" width="40" alt="Qwen">
+<img src="packages/argue-cli/assets/seat-icons/deepseek.svg" width="40" alt="DeepSeek">
+<img src="packages/argue-cli/assets/seat-icons/grok.svg" width="40" alt="Grok">
+<img src="packages/argue-cli/assets/seat-icons/kimi.svg" width="40" alt="Kimi">
+<img src="packages/argue-cli/assets/seat-icons/ollama.svg" width="40" alt="Ollama">
+</p>
+
+### Install it (first time with GitHub? start here)
+
+You only do this once. It takes about 10 minutes.
+
+1. **Install Node.js** (version 22 or newer). Download the "LTS" version from [nodejs.org](https://nodejs.org) and run the installer. On Windows you can instead open **PowerShell** and run:
+   ```bash
+   winget install OpenJS.NodeJS.LTS
+   ```
+2. **Install Git**, the tool that downloads code from GitHub: [git-scm.com/downloads](https://git-scm.com/downloads). On Windows you can run `winget install Git.Git` instead. Close and reopen PowerShell (on a Mac, Terminal) afterwards.
+3. **Download this project and build it.** Paste these lines one at a time:
+   ```bash
+   git clone https://github.com/aman7892222/argue.git
+   cd argue
+   npm install
+   npm run build
+   ```
+4. **Install at least one AI CLI and sign in to it.** The desk uses your own subscriptions. Any of these works:
+   - Claude Code: `irm https://claude.ai/install.ps1 | iex` on Windows, or `curl -fsSL https://claude.ai/install.sh | bash` on Mac/Linux. Then run `claude` once to sign in.
+   - ChatGPT (Codex): `npm install -g @openai/codex`, then `codex login`.
+   - Gemini (Antigravity): `winget install Google.AntigravityCLI` (Mac/Linux: see antigravity.google), then run `agy` once to sign in.
+   - Local models, free and offline: [Ollama](https://ollama.com/download), then `ollama pull llama3.3`.
+5. **Open the desk.** Make a folder for your debates, go into it, and start the desk. It opens in your browser:
+   ```bash
+   mkdir my-debates
+   cd my-debates
+   node ../argue/packages/argue-cli/dist/cli.js ui --exit-when-idle 3
+   ```
+   (Adjust `../argue` if you cloned the project somewhere else.) Optionally, run `npm link -w packages/argue-cli` once inside the `argue` folder, and from then on just type `argue ui` in any folder.
+6. **In the page:** click **Scan for CLIs** and then **Add** next to each AI it finds. Type a question, optionally attach PDFs or images, and press **Start debate**.
+
+**To update later:** go into the `argue` folder and run `git pull`, then `npm install`, then `npm run build`.
+
+### Where your debates are saved
+
+Each finished debate gets its own folder (by default `debates/` next to your `argue.config.json`; use **Change folder…** in the page to pick another):
+
+| File          | What it's for                                                                                                                  |
+| ------------- | ------------------------------------------------------------------------------------------------------------------------------ |
+| `report.pdf`  | The final answer: verdict, full report, claims and scores. Easy to read or share.                                              |
+| `report.html` | The same, plus every round's reasoning (folded). It opens in any browser, works offline, and has a Print / Save as PDF button. |
+| `debate.json` | Everything needed to reopen the debate in the desk or run it again.                                                            |
+
+The PDF is made with Edge or Chrome, whichever your computer has. Without either, use `report.html` and its Print button. Debates, settings, logins and usage numbers stay on **your** computer and are never uploaded.
+
+### Seats: any AI CLI
+
+**Scan for CLIs** finds Claude Code, Codex, Antigravity, Gemini CLI, Copilot, opencode, Ollama, llm, Qwen Code, Aider, Cursor Agent, Goose, Kimi and Mistral Vibe, plus pi, droid and Amp. **Other CLI** seats anything else. Each seat gets its own model and effort picker for every debate. The seat icons (above, and in `packages/argue-cli/assets/seat-icons/`) are free to reuse.
+
 ## Live Demo
 
 [![A sample argue report rendered in the hosted viewer](docs/assets/argue-report-sample.jpeg)](https://argue.onev.cat/example)
@@ -106,7 +171,8 @@ The page is served only on `127.0.0.1`, and its API requires a token that is cre
 ### Security & privacy
 
 - **No accounts in this repo.** argue never stores logins. Each agent CLI uses its own sign-in on your machine (`~/.claude`, `~/.codex`, the OS keyring for agy), so anyone who clones this repo uses _their_ subscriptions, never yours.
-- **Agents can't act by default.** CLI seats run with `permissionMode: "safe"`: no auto-approval for any CLI, Codex in a read-only sandbox, Gemini CLI in read-only `plan` mode, and Claude with no tools, no MCP servers and no skills (`--tools "" --strict-mcp-config --disable-slash-commands`). A hostile debate topic, or a peer's output, can't make a seat run commands or edit files. Set `"permissionMode": "auto"` on a provider (or pass `--permission-mode auto` to `config add-provider`) only when an agent has to act, for example with `--action`.
+- **Agents can't act by default.** CLI seats run with `permissionMode: "safe"`: no auto-approval for any CLI, Codex in a read-only sandbox, Gemini CLI in read-only `plan` mode, and Claude in restricted mode with no tools, no MCP servers and no skills (`--restricted --tools "" --strict-mcp-config --disable-slash-commands`). A hostile debate topic, or a peer's output, can't make a seat run commands or edit files. Set `"permissionMode": "auto"` on a provider (or pass `--permission-mode auto` to `config add-provider`) only when an agent has to act, for example with `--action`.
+- **Attachments are read, not run.** Claude only gets a `Read` tool, inside the attachments folder (`--restricted`), Codex gets images via `-i`, and the rest see file paths. One caveat: Codex's read-only sandbox can still _read_ other files on the computer, so a hostile PDF could make it quote one of your files into the debate. That text goes only to your own AI accounts and your local report, but don't attach files you don't trust to a Codex seat.
 - **The debate desk is local-only.** It listens on `127.0.0.1`, needs a fresh random token on every launch, compares that token in constant time, and rejects requests whose `Host` or `Origin` isn't its own page. That blocks other websites and DNS-rebinding tricks. Model output is always rendered as text, and a strict Content-Security-Policy blocks outside scripts. **Quit** and `--exit-when-idle` leave nothing running.
 - **Local files stay local.** `argue.config.json`, `out/` and `.argue/` are git-ignored. Usage data lives in `~/.argue/usage.json`.
 - **`argue view` is optional and third-party.** It opens results in the hosted viewer at `argue.onev.cat` by putting the report in the URL fragment. The debate desk doesn't use it. Skip `argue view` if you'd rather nothing leave your machine.
