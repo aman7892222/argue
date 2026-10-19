@@ -1,0 +1,106 @@
+import { readFile, writeFile } from "node:fs/promises";
+import { CLI_TYPES, CliConfigSchema, defaultCliCommand, type CliType } from "../config.js";
+
+/** Adding and removing CLI seats (provider + agent) in the workspace config, for the debate desk. */
+
+export type AddSeatRequest = {
+  id: string;
+  cliType: CliType;
+  model: string;
+  command?: string;
+  args?: string[];
+};
+
+const ID_PATTERN = /^[A-Za-z0-9][\w.-]{0,39}$/;
+
+export function parseAddSeatRequest(body: unknown): { ok: true; value: AddSeatRequest } | { ok: false; error: string } {
+  if (!body || typeof body !== "object") return { ok: false, error: "expected a JSON object" };
+  const input = body as Record<string, unknown>;
+
+  const id = typeof input.id === "string" ? input.id.trim() : "";
+  if (!ID_PATTERN.test(id)) {
+    return { ok: false, error: "seat name: 1-40 letters, digits, '.', '_' or '-', starting with a letter or digit" };
+  }
+
+  const cliType = input.cliType;
+  if (typeof cliType !== "string" || !(CLI_TYPES as readonly string[]).includes(cliType) || cliType === "generic") {
+    return { ok: false, error: "pick a CLI type" };
+  }
+
+  const model = typeof input.model === "string" ? input.model.trim() : "";
+  if (!model || model.length > 200) return { ok: false, error: "model is required" };
+
+  const command = typeof input.command === "string" && input.command.trim() ? input.command.trim() : undefined;
+  if (cliType === "text" && !command) return { ok: false, error: "a custom CLI needs its command" };
+
+  let args: string[] | undefined;
+  if (input.args !== undefined) {
+    if (!Array.isArray(input.args) || !input.args.every((a) => typeof a === "string")) {
+      return { ok: false, error: "args must be a list of strings" };
+    }
+    args = (input.args as string[]).map((a) => a.trim()).filter(Boolean);
+  }
+
+  return {
+    ok: true,
+    value: { id, cliType: cliType as CliType, model, ...(command ? { command } : {}), ...(args ? { args } : {}) }
+  };
+}
+
+type RawConfig = {
+  providers?: Record<string, unknown>;
+  agents?: Array<{ id: string; provider: string; [key: string]: unknown }>;
+  defaults?: { defaultAgents?: string[]; [key: string]: unknown };
+  [key: string]: unknown;
+};
+
+async function readRaw(configPath: string): Promise<RawConfig> {
+  return JSON.parse(await readFile(configPath, "utf8")) as RawConfig;
+}
+
+async function writeValidated(configPath: string, config: RawConfig): Promise<void> {
+  // Refuse to write anything argue itself would reject.
+  CliConfigSchema.parse(config);
+  await writeFile(configPath, `${JSON.stringify(config, null, 2)}\n`, "utf8");
+}
+
+export async function addSeat(configPath: string, seat: AddSeatRequest): Promise<void> {
+  const config = await readRaw(configPath);
+  config.providers ??= {};
+  config.agents ??= [];
+
+  if (config.agents.some((agent) => agent.id === seat.id)) throw new Error(`A seat named "${seat.id}" already exists.`);
+
+  let providerId = seat.id;
+  for (let n = 2; config.providers[providerId]; n++) providerId = `${seat.id}-${n}`;
+
+  config.providers[providerId] = {
+    type: "cli",
+    cliType: seat.cliType,
+    command: seat.command ?? defaultCliCommand(seat.cliType),
+    args: seat.args ?? [],
+    models: { [seat.model]: {} }
+  };
+  config.agents.push({ id: seat.id, provider: providerId, model: seat.model });
+  if (config.defaults?.defaultAgents) config.defaults.defaultAgents.push(seat.id);
+
+  await writeValidated(configPath, config);
+}
+
+export async function removeSeat(configPath: string, agentId: string): Promise<void> {
+  const config = await readRaw(configPath);
+  const agents = config.agents ?? [];
+  const agent = agents.find((a) => a.id === agentId);
+  if (!agent) throw new Error(`No seat named "${agentId}".`);
+
+  config.agents = agents.filter((a) => a.id !== agentId);
+  // Drop the provider too once no other seat uses it.
+  if (config.providers && !config.agents.some((a) => a.provider === agent.provider)) {
+    delete config.providers[agent.provider];
+  }
+  if (config.defaults?.defaultAgents) {
+    config.defaults.defaultAgents = config.defaults.defaultAgents.filter((id) => id !== agentId);
+  }
+
+  await writeValidated(configPath, config);
+}

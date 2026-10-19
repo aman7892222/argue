@@ -1,4 +1,4 @@
-import { mkdir, mkdtemp, writeFile } from "node:fs/promises";
+import { mkdir, mkdtemp, readFile, writeFile } from "node:fs/promises";
 import { request } from "node:http";
 import { tmpdir } from "node:os";
 import { join } from "node:path";
@@ -158,6 +158,75 @@ describe("ui server", () => {
       ["antigravity", ["g"], "tokens"]
     ]);
   });
+
+  it("adds and removes CLI seats in the config, refusing invalid ones", async () => {
+    const { configPath } = await makeWorkspace();
+    server = await startUiServer({ configPath });
+
+    const added = await call(server, "/api/seats", {
+      method: "POST",
+      body: { id: "mycli", cliType: "text", model: "m1", command: "mycli", args: ["--model", "{providerModel}"] }
+    });
+    expect(added.status).toBe(201);
+    const afterAdd = JSON.parse(await readFile(configPath, "utf8")) as {
+      providers: Record<string, unknown>;
+      agents: Array<{ id: string }>;
+    };
+    expect(afterAdd.providers.mycli).toEqual({
+      type: "cli",
+      cliType: "text",
+      command: "mycli",
+      args: ["--model", "{providerModel}"],
+      models: { m1: {} }
+    });
+    expect(afterAdd.agents.map((a) => a.id)).toEqual(["a1", "a2", "mycli"]);
+
+    const config = (await call(server, "/api/config")).body as {
+      agents: Array<{ id: string; cliType: string | null }>;
+    };
+    expect(config.agents.find((a) => a.id === "mycli")?.cliType).toBe("text");
+
+    expect(
+      (
+        await call(server, "/api/seats", {
+          method: "POST",
+          body: { id: "mycli", cliType: "text", model: "x", command: "c" }
+        })
+      ).status
+    ).toBe(400);
+    expect(
+      (
+        await call(server, "/api/seats", {
+          method: "POST",
+          body: { id: "bad name!", cliType: "claude", model: "opus" }
+        })
+      ).status
+    ).toBe(400);
+    expect(
+      (await call(server, "/api/seats", { method: "POST", body: { id: "t", cliType: "text", model: "m" } })).body
+    ).toEqual({
+      error: "a custom CLI needs its command"
+    });
+
+    expect((await call(server, "/api/seats/mycli", { method: "DELETE" })).status).toBe(200);
+    const afterRemove = JSON.parse(await readFile(configPath, "utf8")) as { providers: Record<string, unknown> };
+    expect(afterRemove.providers.mycli).toBeUndefined();
+    expect((await call(server, "/api/seats/nobody", { method: "DELETE" })).status).toBe(400);
+  });
+
+  it("stops when the page asks it to quit, and after going idle", async () => {
+    const { configPath } = await makeWorkspace();
+    const quitting = await startUiServer({ configPath });
+    expect((await call(quitting, "/api/shutdown", { method: "POST" })).status).toBe(200);
+    await quitting.closed;
+
+    const idle = await startUiServer({ configPath, idleExitMs: 1 });
+    // The idle check runs every 5 s; closing must resolve `closed` without a request ever arriving.
+    await Promise.race([
+      idle.closed,
+      new Promise((_, reject) => setTimeout(() => reject(new Error("idle server did not stop")), 8000))
+    ]);
+  }, 12_000);
 
   it("launches a run and reports it before any event exists", async () => {
     const { root, configPath } = await makeWorkspace();

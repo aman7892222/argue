@@ -7,7 +7,9 @@ import { fileURLToPath } from "node:url";
 import { loadCliConfig, type LoadedCliConfig } from "../config.js";
 import { newRequestId, REQUEST_ID_PATTERN } from "../request-id.js";
 import { resolveRunPlan } from "../run-plan.js";
+import { detectClis } from "../cli-catalog.js";
 import { readSeatUsage } from "../usage.js";
+import { addSeat, parseAddSeatRequest, removeSeat } from "./seats.js";
 import { renderUiPage } from "./page.js";
 
 const TOKEN_PLACEHOLDER = "{requestId}";
@@ -21,6 +23,11 @@ export type UiServerOptions = {
   port?: number;
   /** Override how `argue run` is launched (tests). Defaults to this CLI's own entry point. */
   runCommand?: { command: string; args: string[] };
+  /**
+   * Shut down (stopping any debate it launched) once no page has called the API for this long.
+   * The open page polls every few seconds, so this only fires after the tab is closed.
+   */
+  idleExitMs?: number;
 };
 
 export type UiServer = {
@@ -28,6 +35,8 @@ export type UiServer = {
   port: number;
   token: string;
   close(): Promise<void>;
+  /** Resolves once the server has stopped (closed, idle timeout, or Quit from the page). */
+  closed: Promise<void>;
 };
 
 type RunPaths = { requestId: string; jsonlPath: string; resultPath: string; summaryPath: string; errorPath: string };
@@ -53,6 +62,24 @@ export async function startUiServer(options: UiServerOptions = {}): Promise<UiSe
   const runCommand = options.runCommand ?? defaultRunCommand();
 
   const loadConfig = (): Promise<LoadedCliConfig> => loadCliConfig({ explicitPath: options.configPath });
+  let lastSeen = Date.now();
+  let resolveClosed: () => void = () => {};
+  const closed = new Promise<void>((resolve) => (resolveClosed = resolve));
+  let closing: Promise<void> | null = null;
+  const close = (): Promise<void> =>
+    (closing ??= new Promise<void>((resolve) => {
+      clearInterval(idleTimer);
+      for (const run of launched.values()) if (run.state === "running") killTree(run.child);
+      server.close(() => {
+        resolveClosed();
+        resolve();
+      });
+      server.closeAllConnections();
+    }));
+  const idleTimer = setInterval(() => {
+    if (options.idleExitMs && Date.now() - lastSeen > options.idleExitMs) void close();
+  }, 5_000);
+  idleTimer.unref();
 
   const server: Server = createServer((req, res) => {
     handle(req, res).catch((error: unknown) => sendJson(res, 500, { error: String(error) }));
@@ -87,17 +114,78 @@ export async function startUiServer(options: UiServerOptions = {}): Promise<UiSe
       sendJson(res, 401, { error: "missing or invalid token" });
       return;
     }
+    lastSeen = Date.now();
+
+    if (req.method === "POST" && url.pathname === "/api/shutdown") {
+      sendJson(res, 200, { ok: true });
+      setTimeout(() => void close(), 50);
+      return;
+    }
+
+    if (req.method === "GET" && url.pathname === "/api/clis") {
+      // Lists installed agent CLIs and their models. Model listing (agy models, codex debug models)
+      // asks the CLI for its catalog; it does not send any prompt or spend tokens.
+      const detected = await detectClis({ list: url.searchParams.get("list") === "1" });
+      sendJson(res, 200, {
+        clis: detected.map((d) => ({
+          cliType: d.cli.cliType,
+          label: d.cli.label,
+          command: d.cli.command,
+          installed: !!d.path,
+          path: d.path,
+          models: d.models,
+          modelHint: d.cli.modelHint ?? null,
+          note: d.cli.note ?? null,
+          install: d.cli.install
+        }))
+      });
+      return;
+    }
+
+    if (req.method === "POST" && url.pathname === "/api/seats") {
+      const parsed = parseAddSeatRequest(await readBody(req));
+      if (!parsed.ok) {
+        sendJson(res, 400, { error: parsed.error });
+        return;
+      }
+      const loaded = await loadConfig();
+      try {
+        await addSeat(loaded.configPath, parsed.value);
+      } catch (error) {
+        sendJson(res, 400, { error: error instanceof Error ? error.message : String(error) });
+        return;
+      }
+      sendJson(res, 201, { ok: true });
+      return;
+    }
+
+    const seatMatch = /^\/api\/seats\/([^/]+)$/.exec(url.pathname);
+    if (seatMatch && req.method === "DELETE") {
+      const loaded = await loadConfig();
+      try {
+        await removeSeat(loaded.configPath, decodeURIComponent(seatMatch[1]!));
+      } catch (error) {
+        sendJson(res, 400, { error: error instanceof Error ? error.message : String(error) });
+        return;
+      }
+      sendJson(res, 200, { ok: true });
+      return;
+    }
 
     if (req.method === "GET" && url.pathname === "/api/config") {
       const loaded = await loadConfig();
       sendJson(res, 200, {
         configPath: loaded.configPath,
-        agents: loaded.config.agents.map((agent) => ({
-          id: agent.id,
-          provider: agent.provider,
-          model: agent.model,
-          role: agent.role
-        })),
+        agents: loaded.config.agents.map((agent) => {
+          const provider = loaded.config.providers[agent.provider];
+          return {
+            id: agent.id,
+            provider: agent.provider,
+            model: agent.model,
+            role: agent.role,
+            cliType: provider?.type === "cli" ? provider.cliType : null
+          };
+        }),
         defaults: {
           agents: loaded.config.defaults?.defaultAgents ?? loaded.config.agents.map((agent) => agent.id),
           maxRounds: loaded.config.defaults?.maxRounds ?? 3,
@@ -265,12 +353,8 @@ export async function startUiServer(options: UiServerOptions = {}): Promise<UiSe
     url: `http://127.0.0.1:${port}/#t=${token}`,
     port,
     token,
-    close: () =>
-      new Promise<void>((resolve) => {
-        for (const run of launched.values()) if (run.state === "running") killTree(run.child);
-        server.close(() => resolve());
-        server.closeAllConnections();
-      })
+    close,
+    closed
   };
 }
 

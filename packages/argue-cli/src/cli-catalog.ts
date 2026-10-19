@@ -1,5 +1,5 @@
 import { access } from "node:fs/promises";
-import { extname, join } from "node:path";
+import { extname, join, normalize } from "node:path";
 import spawn from "cross-spawn";
 import type { CliType } from "./config.js";
 
@@ -17,6 +17,8 @@ export interface KnownCli {
   modelHint?: string;
   install: string;
   note?: string;
+  /** Standard install locations to try when the command is not on PATH ({home}, {localappdata}). */
+  knownPaths?: string[];
 }
 
 export const KNOWN_CLIS: KnownCli[] = [
@@ -25,6 +27,8 @@ export const KNOWN_CLIS: KnownCli[] = [
     command: "claude",
     label: "Claude Code",
     suggestedModels: ["opus", "sonnet", "haiku", "fable"],
+    // The native installer puts claude here without always adding it to PATH.
+    knownPaths: ["{home}/.local/bin/claude.exe", "{home}/.local/bin/claude"],
     install: "irm https://claude.ai/install.ps1 | iex  (macOS/Linux: curl -fsSL https://claude.ai/install.sh | bash)",
     note: "fable may bill usage credits on some plans"
   },
@@ -43,6 +47,7 @@ export const KNOWN_CLIS: KnownCli[] = [
     label: "Google Antigravity",
     listModelsArgs: ["models"],
     parseModels: parseTabularModels,
+    knownPaths: ["{localappdata}/agy/bin/agy.exe"],
     install:
       "winget install Google.AntigravityCLI  (macOS/Linux: curl -fsSL https://antigravity.google/cli/install.sh | bash)"
   },
@@ -128,6 +133,24 @@ export async function findOnPath(
   return null;
 }
 
+async function findKnownPath(paths: string[] | undefined, env: NodeJS.ProcessEnv): Promise<string | null> {
+  const home = env.USERPROFILE ?? env.HOME;
+  for (const template of paths ?? []) {
+    if (template.includes("{home}") && !home) continue;
+    if (template.includes("{localappdata}") && !env.LOCALAPPDATA) continue;
+    const candidate = normalize(
+      template.replace("{home}", home ?? "").replace("{localappdata}", env.LOCALAPPDATA ?? "")
+    );
+    try {
+      await access(candidate);
+      return candidate;
+    } catch {
+      // not installed there
+    }
+  }
+  return null;
+}
+
 export interface DetectedCli {
   cli: KnownCli;
   path: string | null;
@@ -146,7 +169,7 @@ export async function detectClis(options: {
 
   return Promise.all(
     catalog.map(async (cli): Promise<DetectedCli> => {
-      const path = await findOnPath(cli.command, env);
+      const path = (await findOnPath(cli.command, env)) ?? (await findKnownPath(cli.knownPaths, env));
       const suggested = cli.suggestedModels ?? [];
       const fallback: DetectedCli = {
         cli,

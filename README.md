@@ -87,6 +87,10 @@ Results come first: the verdict, the claims with their tallies, and the peer sco
 
 These limits are shared with your other use of each plan. The Claude ring updates whenever a debate calls Claude, and the Codex ring whenever Codex runs anywhere.
 
+**Seats from the page.** Use **+ Connect another CLI** to see which agent CLIs are installed and what models each offers. Listing models asks each CLI for its catalog; it sends no prompts and uses no tokens. Pick a CLI and a model, or choose **Other CLI** to seat any command that reads a prompt and prints an answer. To remove a seat, hover it and click **×**.
+
+**Nothing keeps running.** Click **Quit** on the page (or press Ctrl+C) to stop the desk and any debate it started. With `argue ui --exit-when-idle [minutes]` (default 3), the desk also stops by itself that long after its page is closed.
+
 The page is served only on `127.0.0.1`, and its API requires a token that is created fresh each time the UI starts and is included in the printed link. Use `--port <n>` for a fixed port and `--no-open` to print the link instead of opening a browser. The UI shows each agent's final answer and stated reasoning, not its hidden chain of thought: agent CLIs do not expose that.
 
 ### Run a Debate

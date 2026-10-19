@@ -148,6 +148,7 @@ async function runUi(args: string[], io: Pick<typeof console, "log" | "error">):
   let configPath: string | undefined;
   let port: number | undefined;
   let open = true;
+  let idleMinutes: number | undefined;
   for (let i = 0; i < args.length; i++) {
     const arg = args[i];
     if (arg === "--config" || arg === "-c") {
@@ -158,6 +159,11 @@ async function runUi(args: string[], io: Pick<typeof console, "log" | "error">):
       if (!Number.isInteger(port) || port < 0 || port > 65535) return usageError(io, "--port must be 0-65535");
     } else if (arg === "--no-open") {
       open = false;
+    } else if (arg === "--exit-when-idle") {
+      // Optional minutes value; default 3.
+      const next = args[i + 1];
+      idleMinutes = next !== undefined && /^\d+(\.\d+)?$/.test(next) ? Number(args[++i]) : 3;
+      if (!(idleMinutes > 0)) return usageError(io, "--exit-when-idle minutes must be > 0");
     } else {
       return usageError(io, `Unknown option for ui: ${arg}`);
     }
@@ -166,21 +172,26 @@ async function runUi(args: string[], io: Pick<typeof console, "log" | "error">):
   try {
     // Fail fast on a missing/invalid config rather than serving a broken page.
     const loaded = await loadCliConfig({ explicitPath: configPath });
-    const server = await startUiServer({ configPath: loaded.configPath, ...(port !== undefined ? { port } : {}) });
+    const server = await startUiServer({
+      configPath: loaded.configPath,
+      ...(port !== undefined ? { port } : {}),
+      ...(idleMinutes ? { idleExitMs: idleMinutes * 60_000 } : {})
+    });
     io.log(`[argue] debate desk running at ${server.url}`);
     io.log(`  config: ${loaded.configPath}`);
-    io.log("  only reachable from this computer; press Ctrl+C to stop");
+    io.log("  only reachable from this computer; press Ctrl+C (or Quit on the page) to stop");
+    if (idleMinutes) {
+      io.log(`  stops by itself ${idleMinutes} min after the page is closed, along with any debate it started`);
+    }
     if (open) await launchBrowser(server.url);
 
-    await new Promise<void>((resolve) => {
-      const stop = (): void => {
-        process.off("SIGINT", stop);
-        process.off("SIGTERM", stop);
-        void server.close().then(resolve);
-      };
-      process.on("SIGINT", stop);
-      process.on("SIGTERM", stop);
-    });
+    const stop = (): void => void server.close();
+    process.on("SIGINT", stop);
+    process.on("SIGTERM", stop);
+    await server.closed;
+    process.off("SIGINT", stop);
+    process.off("SIGTERM", stop);
+    io.log("[argue] debate desk stopped");
     return { ok: true, code: 0 };
   } catch (error) {
     io.error(String(error));
@@ -1530,7 +1541,7 @@ function printHelp(io: Pick<typeof console, "log">): void {
   io.log(
     "  argue act --result <path> --task <prompt> [--agent <id>] [--config <path>] [--no-action-full-result] [--no-color]"
   );
-  io.log("  argue ui [--config <path>] [--port <n>] [--no-open]  # local web UI: start debates, watch them live");
+  io.log("  argue ui [--config <path>] [--port <n>] [--no-open] [--exit-when-idle [min]]  # local web UI");
   io.log("  argue models [--json] [--no-list] # find installed agent CLIs, their models, and add commands");
   io.log("  argue config init                # create empty config file");
   io.log("  argue config add-provider ...    # append provider to config");
