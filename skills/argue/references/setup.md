@@ -25,9 +25,14 @@ argue config init -c /path/to/config.json
 
 ### CLI-based providers (recommended)
 
-Agents run via their respective CLIs — no API keys needed if you're already authenticated:
+Agents run via their respective CLIs — no API keys needed if you're already authenticated.
+
+Start with `argue models`: it shows which agent CLIs are installed, their model ids (where the CLI can list them), and the exact `add-provider` command for each. Use `argue models --json` when parsing the output.
 
 ```bash
+# Google Antigravity CLI (agy); works with Google AI Pro logins, unlike the Gemini CLI
+argue config add-provider --id antigravity --type cli --cli-type antigravity --model-id gemini-4-argon-high --agent gemini-agent
+
 # OpenAI Codex CLI
 argue config add-provider --id codex --type cli --cli-type codex --model-id gpt-5.4
 
@@ -40,7 +45,13 @@ argue config add-provider --id claude --type cli --cli-type claude --model-id cl
 # GitHub Copilot CLI
 argue config add-provider --id copilot --type cli --cli-type copilot --model-id gpt-5.4
 
-# Other CLI types: pi, opencode, droid, amp, generic
+# Other CLI types: pi, opencode, droid, amp, text, generic
+```
+
+For any other agent CLI, use the `text` CLI type. It receives the prompt as plain text on stdin, or in an arg containing `{prompt}`, and its plain-text answer is parsed:
+
+```bash
+argue config add-provider --id mycli --type cli --cli-type text --command mycli --args "--print,--model,{providerModel}" --model-id my-model
 ```
 
 For `generic` CLI type, specify `--command` and `--args`:

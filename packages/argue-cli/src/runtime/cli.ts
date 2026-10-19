@@ -39,7 +39,12 @@ export function createCliRunner(raw: CliProviderConfig): ProviderTaskRunner {
         hasSession ? sessionUUID : undefined,
         isResume
       );
-      const extraArgs = provider.args.map((arg) => renderTemplate(arg, task, agent));
+      // `text` CLIs that cannot read stdin take the prompt through a `{prompt}` arg instead.
+      const promptInArgs = provider.cliType === "text" && provider.args.some((arg) => arg.includes("{prompt}"));
+      const extraArgs = provider.args.map((arg) => {
+        const rendered = renderTemplate(arg, task, agent);
+        return provider.cliType === "text" ? rendered.replaceAll("{prompt}", prompt) : rendered;
+      });
 
       if (reasoning && !reasoningApplied && !warnedUnsupportedReasoning) {
         warnedUnsupportedReasoning = true;
@@ -64,7 +69,7 @@ export function createCliRunner(raw: CliProviderConfig): ProviderTaskRunner {
               }
             : {})
         },
-        stdin: buildStdin(provider.cliType, prompt),
+        stdin: promptInArgs ? "" : buildStdin(provider.cliType, prompt),
         abortSignal
       });
 
@@ -131,6 +136,7 @@ function usesStdinPrompt(cliType: CliProviderConfig["cliType"]): boolean {
     case "gemini":
     case "pi":
     case "antigravity":
+    case "text":
     case "generic":
       return true;
     case "copilot":
@@ -206,6 +212,9 @@ function buildBaseArgs(
       return { args: ["exec", "--auto", "high", "-m", providerModel], reasoningApplied: false };
     case "amp":
       return { args: ["-x", prompt, "--dangerously-allow-all"], reasoningApplied: false };
+    case "text":
+      // Any other agent CLI: no built-in flags; the user's `args` carry model/print flags.
+      return { args: [], reasoningApplied: false };
     case "generic":
       return { args: [], reasoningApplied: !!reasoning };
     default:

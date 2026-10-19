@@ -7,6 +7,8 @@ Fork of [onevcat/argue](https://github.com/onevcat/argue) by aman7892222. Headli
 ### Features
 
 - New `antigravity` cliType (default command `agy`): the prompt is sent as a stream-json `user` event on stdin, and the answer is read from the terminal `{"event":"result"}` line. No permission-bypass flag is passed. This replaces the Gemini CLI path, which no longer accepts Google AI Pro logins.
+- New `argue models [--json] [--no-list]` command. It detects installed agent CLIs on PATH, lists each one's models (from `agy models`, or suggested aliases for Claude Code), shows install hints for missing ones, and prints a ready-to-paste `config add-provider ... --agent` line for each.
+- New `text` cliType for **any** agent CLI. argue adds no flags of its own: the formatted prompt goes to stdin, or into an arg containing `{prompt}`, and the plain-text output is parsed. Model and print flags go in `args`, for example `{providerModel}`.
 
 ### Fixes
 

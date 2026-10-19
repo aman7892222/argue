@@ -49,6 +49,24 @@ argue config add-provider --id claude --type cli --cli-type claude --model-id so
 argue config add-provider --id codex --type cli --cli-type codex --model-id gpt-5.3-codex --agent codex-agent
 ```
 
+#### Use any agent CLI
+
+`argue models` scans your PATH for known agent CLIs, lists each one's models where the CLI can report them, and prints a ready-to-paste `add-provider` line for each:
+
+```bash
+argue models          # human-readable
+argue models --json   # for scripts and skills
+```
+
+Built-in cliTypes: `claude`, `codex`, `antigravity` (Google's `agy`; Gemini via an AI Pro login), `gemini`, `copilot`, `opencode`, `pi`, `droid`, `amp`. For **any other** agent CLI, use `text`. argue adds no flags of its own: it sends the prompt as plain text on stdin, or puts it in an arg that contains `{prompt}`, and parses the text that comes back:
+
+```bash
+argue config add-provider --id mycli --type cli --cli-type text --command mycli \
+  --args "--print,--model,{providerModel}" --model-id my-model --agent mycli
+```
+
+On Windows, npm-installed CLIs (`.cmd` shims) are launched directly; no extra setup is needed.
+
 ### Run a Debate
 
 ```bash

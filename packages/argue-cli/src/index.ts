@@ -19,6 +19,7 @@ import {
   type LoadedCliConfig,
   type ResolveConfigPathOptions
 } from "./config.js";
+import { addProviderCommand, detectClis, formatDetectedClis } from "./cli-catalog.js";
 import { executeHeadlessRun } from "./headless-run.js";
 import { createOutputFormatter } from "./output.js";
 import { loadRunInput } from "./run-input.js";
@@ -129,9 +130,52 @@ export async function runCli(argv: string[], io: Pick<typeof console, "log" | "e
     return runView(rest, io);
   }
 
+  if (command === "models") {
+    return runModels(rest, io);
+  }
+
   io.error(`Unknown command: ${command}`);
   printHelp(io);
   return { ok: false, code: 1 };
+}
+
+async function runModels(args: string[], io: Pick<typeof console, "log" | "error">): Promise<CliResult> {
+  let json = false;
+  let list = true;
+  for (const arg of args) {
+    if (arg === "--json") json = true;
+    else if (arg === "--no-list") list = false;
+    else {
+      io.error(`Unknown option for models: ${arg}`);
+      return { ok: false, code: 1 };
+    }
+  }
+
+  const detected = await detectClis({ list });
+  if (json) {
+    io.log(
+      JSON.stringify(
+        detected.map((d) => ({
+          cliType: d.cli.cliType,
+          command: d.cli.command,
+          label: d.cli.label,
+          installed: !!d.path,
+          path: d.path,
+          models: d.models,
+          modelsSource: d.modelsSource,
+          ...(d.listError ? { listError: d.listError } : {}),
+          ...(d.path
+            ? { addCommand: addProviderCommand(d.cli, d.models[0] ?? "<model-id>") }
+            : { install: d.cli.install })
+        })),
+        null,
+        2
+      )
+    );
+  } else {
+    for (const line of formatDetectedClis(detected)) io.log(line);
+  }
+  return { ok: true, code: 0 };
 }
 
 async function runHeadless(args: string[], io: Pick<typeof console, "log" | "error">): Promise<CliResult> {
@@ -1432,6 +1476,7 @@ function printHelp(io: Pick<typeof console, "log">): void {
   io.log(
     "  argue act --result <path> --task <prompt> [--agent <id>] [--config <path>] [--no-action-full-result] [--no-color]"
   );
+  io.log("  argue models [--json] [--no-list] # find installed agent CLIs, their models, and add commands");
   io.log("  argue config init                # create empty config file");
   io.log("  argue config add-provider ...    # append provider to config");
   io.log("  argue config add-agent ...       # append agent to config");
@@ -1473,8 +1518,9 @@ function printHelp(io: Pick<typeof console, "log">): void {
   io.log(
     `    api options: --vendor <${getVendorNames().join("|")}> | --protocol <openai-compatible|anthropic-compatible> [--base-url <url>] [--api-key-env <ENV_VAR>]`
   );
+  io.log(`    cli options: --cli-type <${CLI_TYPES.join("|")}> [--command <binary>] [--args a,b,c]`);
   io.log(
-    "    cli options: --cli-type <codex|claude|copilot|gemini|antigravity|pi|opencode|droid|amp|generic> [--command <binary>] [--args a,b,c]"
+    "      text: any other agent CLI; prompt on stdin, or in an arg containing {prompt}; use {providerModel} in --args"
   );
   io.log("    sdk options: --adapter <module> [--export-name <name>]");
   io.log(

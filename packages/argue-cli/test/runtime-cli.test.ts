@@ -587,6 +587,42 @@ process.stdout.write(JSON.stringify(output));
     );
   });
 
+  it("text cliType adds no flags of its own and sends the prompt on stdin", async () => {
+    const script = await createArgvAndStdinEchoScript("argue-cli-runner-text-stdin-");
+
+    const runner = createCliRunner({
+      type: "cli",
+      cliType: "text",
+      command: script,
+      args: ["--model", "{providerModel}"],
+      models: { fake: {} }
+    });
+
+    const result = await runner.runTask({ task: makeRoundTask(), agent });
+    const { argv, stdin } = getArgvAndStdin(result as { kind: string; output: { fullResponse: string } });
+
+    expect(argv.slice(2)).toEqual(["--model", "fake"]);
+    expect(stdin).toContain("argue CLI host");
+  });
+
+  it("text cliType substitutes {prompt} into args and leaves stdin empty", async () => {
+    const script = await createArgvAndStdinEchoScript("argue-cli-runner-text-arg-");
+
+    const runner = createCliRunner({
+      type: "cli",
+      cliType: "text",
+      command: script,
+      args: ["-p", "{prompt}"],
+      models: { fake: {} }
+    });
+
+    const result = await runner.runTask({ task: makeRoundTask(), agent });
+    const { argv, stdin } = getArgvAndStdin(result as { kind: string; output: { fullResponse: string } });
+
+    expect(argv[argv.indexOf("-p") + 1]).toContain("argue CLI host");
+    expect(stdin).toBe("");
+  });
+
   it("parses fenced json output in codex mode", async () => {
     const root = await mkdtemp(join(tmpdir(), "argue-cli-runner-codex-"));
     const script = join(root, "runner.mjs");

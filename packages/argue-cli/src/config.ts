@@ -38,6 +38,7 @@ export const CLI_TYPES = [
   "opencode",
   "droid",
   "amp",
+  "text",
   "generic"
 ] as const;
 
