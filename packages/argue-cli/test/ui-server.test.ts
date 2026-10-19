@@ -26,7 +26,7 @@ async function makeWorkspace(): Promise<{ root: string; configPath: string }> {
 function call(
   server: UiServer,
   path: string,
-  options: { method?: string; token?: string | null; host?: string; body?: unknown } = {}
+  options: { method?: string; token?: string | null; host?: string; origin?: string; body?: unknown } = {}
 ): Promise<{ status: number; body: unknown; text: string }> {
   return new Promise((resolve, reject) => {
     const payload = options.body === undefined ? undefined : JSON.stringify(options.body);
@@ -38,6 +38,7 @@ function call(
         method: options.method ?? "GET",
         headers: {
           host: options.host ?? `127.0.0.1:${server.port}`,
+          ...(options.origin ? { origin: options.origin } : {}),
           ...(options.token === null ? {} : { "x-argue-token": options.token ?? server.token }),
           ...(payload ? { "content-type": "application/json" } : {})
         }
@@ -81,6 +82,9 @@ describe("ui server", () => {
     expect((await call(server, "/api/config", { token: null })).status).toBe(401);
     expect((await call(server, "/api/config", { token: "wrong" })).status).toBe(401);
     expect((await call(server, "/api/config", { host: "evil.example:80" })).status).toBe(403);
+    // A page on another site cannot drive the API, even with the right token.
+    expect((await call(server, "/api/config", { origin: "https://evil.example" })).status).toBe(403);
+    expect((await call(server, "/api/config", { origin: `http://127.0.0.1:${server.port}` })).status).toBe(200);
 
     const config = await call(server, "/api/config");
     expect(config.status).toBe(200);

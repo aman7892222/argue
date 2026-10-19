@@ -53,6 +53,12 @@ export const CliProviderSchema = z
   .object({
     type: z.literal("cli"),
     cliType: z.enum(CLI_TYPES),
+    /**
+     * "safe" (default): agents get no auto-approval, so a debate can't make them run commands or
+     * edit files; Claude also runs with no tools, MCP servers or skills. "auto": the CLI's own
+     * auto-approve flags (e.g. --yolo), needed only when an agent must act, as with `--action`.
+     */
+    permissionMode: z.enum(["safe", "auto"]).optional(),
     command: z.string().min(1).optional(),
     args: z.array(z.string()).default([]),
     env: z.record(z.string()).optional(),

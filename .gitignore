@@ -4,3 +4,9 @@ coverage/
 .env
 .DS_Store
 *.log
+
+# Local argue workspace files: your own seats/paths and debate transcripts stay off GitHub.
+argue.config.json
+out/
+.argue/
+*.events.jsonl

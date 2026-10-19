@@ -373,7 +373,7 @@ process.stdout.write(JSON.stringify(output));
     }
   });
 
-  it("builds copilot base args with prompt in args and --yolo", async () => {
+  it("builds copilot base args with prompt in args and no --yolo by default", async () => {
     const script = await createArgvAndStdinEchoScript("argue-cli-runner-copilot-");
 
     const runner = createCliRunner({
@@ -392,14 +392,14 @@ process.stdout.write(JSON.stringify(output));
     const promptValue = argv[pIdx + 1]!;
     expect(promptValue).toContain("argue CLI host");
 
-    expect(argv).toContain("--yolo");
+    expect(argv).not.toContain("--yolo");
     expect(argv).toContain("--model");
     expect(argv[argv.indexOf("--model") + 1]).toBe("fake");
 
     expect(stdin).toBe("");
   });
 
-  it("builds gemini base args with stdin prompt and --approval-mode yolo", async () => {
+  it("builds gemini base args with stdin prompt and read-only plan mode by default", async () => {
     const script = await createArgvAndStdinEchoScript("argue-cli-runner-gemini-");
 
     const runner = createCliRunner({
@@ -414,7 +414,7 @@ process.stdout.write(JSON.stringify(output));
     const { argv, stdin } = getArgvAndStdin(result as { kind: string; output: { fullResponse: string } });
 
     expect(argv).toContain("--approval-mode");
-    expect(argv[argv.indexOf("--approval-mode") + 1]).toBe("yolo");
+    expect(argv[argv.indexOf("--approval-mode") + 1]).toBe("plan");
     expect(argv).toContain("-m");
     expect(argv[argv.indexOf("-m") + 1]).toBe("fake");
 
@@ -512,7 +512,7 @@ process.stdout.write(JSON.stringify(output));
     expect(argv).toContain("run");
     expect(stdin).toContain("argue CLI host");
 
-    expect(argv).toContain("--dangerously-skip-permissions");
+    expect(argv).not.toContain("--dangerously-skip-permissions");
     expect(argv).toContain("-m");
     expect(argv[argv.indexOf("-m") + 1]).toBe("fake");
   });
@@ -532,8 +532,7 @@ process.stdout.write(JSON.stringify(output));
     const { argv, stdin } = getArgvAndStdin(result as { kind: string; output: { fullResponse: string } });
 
     expect(argv).toContain("exec");
-    expect(argv).toContain("--auto");
-    expect(argv[argv.indexOf("--auto") + 1]).toBe("high");
+    expect(argv).not.toContain("--auto");
     expect(argv).toContain("-m");
     expect(argv[argv.indexOf("-m") + 1]).toBe("fake");
 
@@ -559,11 +558,54 @@ process.stdout.write(JSON.stringify(output));
     const promptValue = argv[xIdx + 1]!;
     expect(promptValue).toContain("argue CLI host");
 
-    expect(argv).toContain("--dangerously-allow-all");
+    expect(argv).not.toContain("--dangerously-allow-all");
     expect(argv).not.toContain("--model");
     expect(argv).not.toContain("-m");
 
     expect(stdin).toBe("");
+  });
+
+  it("locks Claude down to text only by default", async () => {
+    const script = await createArgvEchoScript("argue-cli-runner-claude-safe-");
+    const runner = createCliRunner({ type: "cli", cliType: "claude", command: script, args: [], models: { fake: {} } });
+
+    const argv = getArgv(
+      (await runner.runTask({ task: makeRoundTask(), agent })) as { kind: string; output: { fullResponse: string } }
+    );
+    expect(argv[argv.indexOf("--tools") + 1]).toBe("");
+    expect(argv).toContain("--strict-mcp-config");
+    expect(argv).toContain("--disable-slash-commands");
+    expect(argv).not.toContain("--dangerously-skip-permissions");
+  });
+
+  it.each([
+    ["claude", "--tools", false],
+    ["codex", "--approve-for-me", true],
+    ["copilot", "--yolo", true],
+    ["opencode", "--dangerously-skip-permissions", true],
+    ["droid", "--auto", true],
+    ["amp", "--dangerously-allow-all", true],
+    ["antigravity", "--dangerously-skip-permissions", true]
+  ] as const)("permissionMode auto for %s restores the CLI's own approval flags", async (cliType, flag, present) => {
+    const script =
+      cliType === "antigravity"
+        ? await createAntigravityScript("argue-cli-runner-auto-" + cliType + "-", "SUCCESS")
+        : await createArgvAndStdinEchoScript("argue-cli-runner-auto-" + cliType + "-");
+    const runner = createCliRunner({
+      type: "cli",
+      cliType,
+      command: script,
+      args: [],
+      permissionMode: "auto",
+      models: { fake: {} }
+    });
+
+    const output = JSON.parse(
+      ((await runner.runTask({ task: makeRoundTask(), agent })) as { kind: string; output: { fullResponse: string } })
+        .output.fullResponse
+    ) as string[] | { argv: string[] };
+    const argv = Array.isArray(output) ? output : output.argv;
+    expect(argv.includes(flag)).toBe(present);
   });
 
   it("builds antigravity stream-json args and wraps the prompt as a user event", async () => {

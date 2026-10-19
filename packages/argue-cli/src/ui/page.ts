@@ -13,7 +13,7 @@ const PAGE = String.raw`<!doctype html>
 <meta charset="utf-8">
 <meta name="viewport" content="width=device-width, initial-scale=1">
 <title>argue · debate desk</title>
-<link rel="icon" href="data:image/svg+xml,%3Csvg xmlns='http://www.w3.org/2000/svg' viewBox='0 0 32 32'%3E%3Ccircle cx='16' cy='16' r='13' fill='none' stroke='%23D97757' stroke-width='4' stroke-dasharray='27 100'/%3E%3Ccircle cx='16' cy='16' r='13' fill='none' stroke='%23111' stroke-width='4' stroke-dasharray='27 100' stroke-dashoffset='-27.2'/%3E%3Ccircle cx='16' cy='16' r='13' fill='none' stroke='%239B72CB' stroke-width='4' stroke-dasharray='27 100' stroke-dashoffset='-54.4'/%3E%3C/svg%3E">
+<link rel="icon" href="data:image/svg+xml,%3Csvg xmlns='http://www.w3.org/2000/svg' viewBox='0 0 32 32'%3E%3Ccircle cx='16' cy='16' r='13' fill='none' stroke='%23D97757' stroke-width='4' stroke-dasharray='27 100'/%3E%3Ccircle cx='16' cy='16' r='13' fill='none' stroke='%2310A37F' stroke-width='4' stroke-dasharray='27 100' stroke-dashoffset='-27.2'/%3E%3Ccircle cx='16' cy='16' r='13' fill='none' stroke='%239B72CB' stroke-width='4' stroke-dasharray='27 100' stroke-dashoffset='-54.4'/%3E%3C/svg%3E">
 <style>
 :root {
   --bg: #f6f2ea; --bg2: #efe9de; --panel: #fffdf9; --ink: #1d1b18; --ink2: #3a3631; --muted: #7a736a; --line: #e6dfd3;
@@ -25,7 +25,7 @@ const PAGE = String.raw`<!doctype html>
   --mono: "Cascadia Mono", "SF Mono", Consolas, ui-monospace, monospace;
   --shadow: 0 1px 1px rgba(40, 30, 10, .04), 0 6px 22px rgba(40, 30, 10, .06);
   --claude: #D97757; --claude-soft: #fbeae2;
-  --codex: #111111; --codex-soft: #e9e9e9;
+  --codex: #10A37F; --codex-soft: #e2f4ee;
   --gemini: #7b6fd8; --gemini-soft: #ecebfb;
   --gemini-g: linear-gradient(100deg, #4285F4 0%, #9B72CB 55%, #D96570 100%);
 }
@@ -249,7 +249,7 @@ details.round > .note:last-child { margin-bottom: 16px; }
 <div class="app">
   <aside>
     <div class="brand">
-      <svg viewBox="0 0 32 32" aria-hidden="true"><circle cx="16" cy="16" r="12" fill="none" stroke="#D97757" stroke-width="4" stroke-dasharray="24 100"/><circle cx="16" cy="16" r="12" fill="none" stroke="#111" stroke-width="4" stroke-dasharray="24 100" stroke-dashoffset="-25.1"/><circle cx="16" cy="16" r="12" fill="none" stroke="#9B72CB" stroke-width="4" stroke-dasharray="24 100" stroke-dashoffset="-50.2"/></svg>
+      <svg viewBox="0 0 32 32" aria-hidden="true"><circle cx="16" cy="16" r="12" fill="none" stroke="#D97757" stroke-width="4" stroke-dasharray="24 100"/><circle cx="16" cy="16" r="12" fill="none" stroke="#10A37F" stroke-width="4" stroke-dasharray="24 100" stroke-dashoffset="-25.1"/><circle cx="16" cy="16" r="12" fill="none" stroke="#9B72CB" stroke-width="4" stroke-dasharray="24 100" stroke-dashoffset="-50.2"/></svg>
       <b>argue</b><span>debate desk</span>
     </div>
     <div class="eyebrow">Plan usage</div>
@@ -299,7 +299,7 @@ details.round > .note:last-child { margin-bottom: 16px; }
   var PALETTE = ["#3d5bd9", "#0c8599", "#2f7d4a", "#ae3ec9", "#c2255c", "#e8590c"];
   var THEMES = {
     claude: { name: "Claude", color: "#D97757", soft: "#fbeae2", glyph: "✻" },
-    codex: { name: "ChatGPT · Codex", color: "#111111", soft: "#e6e6e6", glyph: "◐", mono: true },
+    codex: { name: "ChatGPT · Codex", color: "#10A37F", soft: "#e2f4ee", glyph: "✾" },
     antigravity: { name: "Gemini · Antigravity", color: "#7b6fd8", soft: "#ecebfb", glyph: "✦", gradient: ["#4285F4", "#9B72CB", "#D96570"] },
     gemini: { name: "Gemini CLI", color: "#7b6fd8", soft: "#ecebfb", glyph: "✦", gradient: ["#4285F4", "#9B72CB", "#D96570"] }
   };
@@ -366,7 +366,7 @@ details.round > .note:last-child { margin-bottom: 16px; }
   function mark(id) {
     var t = themeFor(id);
     var style = t.gradient ? "background:linear-gradient(135deg," + t.gradient.join(",") + ");color:#fff"
-      : t.mono ? "background:#111;color:#fff" : "background:" + t.soft + ";color:" + t.color;
+      : "background:" + t.soft + ";color:" + t.color;
     return h("span", { class: "mark", style: style, text: t.glyph });
   }
   function agentModel(id) {
@@ -497,7 +497,7 @@ details.round > .note:last-child { margin-bottom: 16px; }
       installed.forEach(function (cli) {
         var t = THEMES[cli.cliType] || { glyph: cli.label[0], color: "#555", soft: "#eee" };
         var b = h("button", { class: "cli-opt", type: "button" },
-          h("span", { class: "mark", style: t.gradient ? "background:linear-gradient(135deg," + t.gradient.join(",") + ");color:#fff" : t.mono ? "background:#111;color:#fff" : "background:" + t.soft + ";color:" + t.color, text: t.glyph }),
+          h("span", { class: "mark", style: t.gradient ? "background:linear-gradient(135deg," + t.gradient.join(",") + ");color:#fff" : "background:" + t.soft + ";color:" + t.color, text: t.glyph }),
           h("span", null, cli.label, h("small", { text: (cli.models.length ? cli.models.length + " models · " : "") + cli.path })),
           cli.note ? h("span", { class: "pill revise pick", title: cli.note, text: "note" }) : null);
         b.addEventListener("click", function () { pick(cli, b); });
@@ -896,15 +896,14 @@ details.round > .note:last-child { margin-bottom: 16px; }
     var fill = svg("circle", { class: "fill", cx: 30, cy: 30, r: R, stroke: stroke, "stroke-dasharray": C, "stroke-dashoffset": C, transform: "rotate(-90 30 30)" });
     var orbit = svg("circle", { class: "orbit", cx: 30, cy: 30, r: R, stroke: stroke, "stroke-dasharray": "10 " + (C - 10), opacity: ".9" });
     orbit.style.display = "none";
-    var inner = t.mono ? svg("circle", { cx: 30, cy: 30, r: 17, fill: "#111" }) : null;
     var glyph = svg("text", { x: 30, y: 31, "text-anchor": "middle", "dominant-baseline": "middle", class: "glyph",
-      fill: t.mono ? "#fff" : t.gradient ? "url(#" + gid + ")" : t.color });
+      fill: t.gradient ? "url(#" + gid + ")" : t.color });
     glyph.textContent = t.glyph;
     var num = h("span", { class: "num" });
     var who = h("span", { class: "who" });
     var tip = h("div", { class: "tip" });
-    var el = h("div", { class: "pod", tabindex: "0" }, svg("svg", { class: "ring", viewBox: "0 0 60 60" }, defs, track, fill, orbit, inner, glyph), num, who, tip);
-    return { el: el, fill: fill, orbit: orbit, glyph: glyph, num: num, who: who, tip: tip, theme: t, inner: inner };
+    var el = h("div", { class: "pod", tabindex: "0" }, svg("svg", { class: "ring", viewBox: "0 0 60 60" }, defs, track, fill, orbit, glyph), num, who, tip);
+    return { el: el, fill: fill, orbit: orbit, glyph: glyph, num: num, who: who, tip: tip, theme: t };
   }
   function updatePod(pod, seat) {
     var u = seat.usage; var t = pod.theme;
@@ -931,9 +930,6 @@ details.round > .note:last-child { margin-bottom: 16px; }
       pod.num.textContent = "—";
       pod.tip.appendChild(h("div", { class: "muted", text: u.reason }));
     }
-    var mono = t.mono && pct !== null;
-    if (pod.inner) pod.inner.style.display = mono ? "" : "none";
-    pod.glyph.setAttribute("fill", mono ? "#fff" : t.gradient ? "url(#g-" + seat.cliType + ")" : t.color);
     pod.orbit.style.display = pct === null ? "" : "none";
     if (pct !== null) {
       var stroke = pct >= 90 ? "#b93a32" : pct >= 75 ? "#c07a12" : null;

@@ -93,6 +93,14 @@ These limits are shared with your other use of each plan. The Claude ring update
 
 The page is served only on `127.0.0.1`, and its API requires a token that is created fresh each time the UI starts and is included in the printed link. Use `--port <n>` for a fixed port and `--no-open` to print the link instead of opening a browser. The UI shows each agent's final answer and stated reasoning, not its hidden chain of thought: agent CLIs do not expose that.
 
+### Security & privacy
+
+- **No accounts in this repo.** argue never stores logins. Each agent CLI uses its own sign-in on your machine (`~/.claude`, `~/.codex`, the OS keyring for agy), so anyone who clones this repo uses _their_ subscriptions, never yours.
+- **Agents can't act by default.** CLI seats run with `permissionMode: "safe"`: no auto-approval for any CLI, Codex in a read-only sandbox, Gemini CLI in read-only `plan` mode, and Claude with no tools, no MCP servers and no skills (`--tools "" --strict-mcp-config --disable-slash-commands`). A hostile debate topic, or a peer's output, can't make a seat run commands or edit files. Set `"permissionMode": "auto"` on a provider (or pass `--permission-mode auto` to `config add-provider`) only when an agent has to act, for example with `--action`.
+- **The debate desk is local-only.** It listens on `127.0.0.1`, needs a fresh random token on every launch, compares that token in constant time, and rejects requests whose `Host` or `Origin` isn't its own page. That blocks other websites and DNS-rebinding tricks. Model output is always rendered as text, and a strict Content-Security-Policy blocks outside scripts. **Quit** and `--exit-when-idle` leave nothing running.
+- **Local files stay local.** `argue.config.json`, `out/` and `.argue/` are git-ignored. Usage data lives in `~/.argue/usage.json`.
+- **`argue view` is optional and third-party.** It opens results in the hosted viewer at `argue.onev.cat` by putting the report in the URL fragment. The debate desk doesn't use it. Skip `argue view` if you'd rather nothing leave your machine.
+
 ### Run a Debate
 
 ```bash

@@ -1,5 +1,5 @@
 import { spawn as nodeSpawn, type ChildProcess } from "node:child_process";
-import { randomBytes } from "node:crypto";
+import { randomBytes, timingSafeEqual } from "node:crypto";
 import { createReadStream } from "node:fs";
 import { readdir, readFile, stat } from "node:fs/promises";
 import { createServer, type IncomingMessage, type Server, type ServerResponse } from "node:http";
@@ -110,7 +110,14 @@ export async function startUiServer(options: UiServerOptions = {}): Promise<UiSe
       return;
     }
 
-    if (req.headers["x-argue-token"] !== token) {
+    // Browsers send Origin on cross-site requests; only this page's own origin may call the API.
+    const origin = req.headers.origin;
+    if (origin !== undefined && !isLoopbackHost(origin.replace(/^http:\/\//, ""), port)) {
+      sendJson(res, 403, { error: "forbidden origin" });
+      return;
+    }
+
+    if (!tokenMatches(req.headers["x-argue-token"], token)) {
       sendJson(res, 401, { error: "missing or invalid token" });
       return;
     }
@@ -362,6 +369,14 @@ function defaultRunCommand(): { command: string; args: string[] } {
   // dist/ui/server.js -> dist/cli.js
   const cliEntry = fileURLToPath(new URL("../cli.js", import.meta.url));
   return { command: process.execPath, args: [cliEntry] };
+}
+
+/** Constant-time comparison, so response timing reveals nothing about the token. */
+function tokenMatches(given: string | string[] | undefined, expected: string): boolean {
+  if (typeof given !== "string") return false;
+  const a = Buffer.from(given);
+  const b = Buffer.from(expected);
+  return a.length === b.length && timingSafeEqual(a, b);
 }
 
 export function isLoopbackHost(host: string | undefined, port: number): boolean {

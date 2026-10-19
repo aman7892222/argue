@@ -39,7 +39,8 @@ export function createCliRunner(raw: CliProviderConfig): ProviderTaskRunner {
         reasoning,
         hasSession ? sessionUUID : undefined,
         isResume,
-        provider.args
+        provider.args,
+        provider.permissionMode ?? "safe"
       );
       // `text` CLIs that cannot read stdin take the prompt through a `{prompt}` arg instead.
       const promptInArgs = provider.cliType === "text" && provider.args.some((arg) => arg.includes("{prompt}"));
@@ -210,20 +211,28 @@ function buildBaseArgs(
   reasoning?: string,
   sessionUUID?: string,
   isResume?: boolean,
-  userArgs: string[] = []
+  userArgs: string[] = [],
+  permissionMode: "safe" | "auto" = "safe"
 ): BaseArgsResult {
+  // A debate only needs text in and text out. In "safe" mode (the default) no agent gets
+  // auto-approval, so a hostile task or a peer's output cannot make it run commands or edit
+  // files. "auto" restores each CLI's own auto-approve flags for `--action` style work.
+  const auto = permissionMode === "auto";
   switch (cliType) {
     case "claude": {
       // stream-json (which requires --verbose) also reports plan rate limits; see parseClaudeStream.
       const output = ["--output-format", "stream-json", "--verbose"];
+      // Safe: no built-in tools, no MCP servers from the user's settings, no skills.
+      const lockdown = auto ? [] : ["--tools", "", "--strict-mcp-config", "--disable-slash-commands"];
       const args =
         sessionUUID && isResume
-          ? ["--print", "--model", providerModel, ...output, "--resume", sessionUUID]
+          ? ["--print", "--model", providerModel, ...output, ...lockdown, "--resume", sessionUUID]
           : [
               "--print",
               "--model",
               providerModel,
               ...output,
+              ...lockdown,
               ...(sessionUUID ? ["--session-id", sessionUUID] : ["--no-session-persistence"])
             ];
 
@@ -234,11 +243,13 @@ function buildBaseArgs(
     }
     case "codex": {
       const reasoningArgs = reasoning ? ["-c", `model_reasoning_effort=${reasoning}`] : [];
-      // Debates need no tool writes, so default to a read-only sandbox. If the user's args
-      // already choose a mode (e.g. --sandbox workspace-write for --action), defer to them.
+      // Safe: read-only sandbox. Auto: Codex's own automatic approval. Either way, if the
+      // user's args already choose a mode (e.g. --sandbox workspace-write), defer to them.
       const sandboxArgs = userArgs.some((arg) => CODEX_PERMISSION_FLAGS.has(arg.split("=")[0]!))
         ? []
-        : ["--sandbox", "read-only"];
+        : auto
+          ? ["--approve-for-me"]
+          : ["--sandbox", "read-only"];
       return {
         args: [
           "exec",
@@ -254,14 +265,22 @@ function buildBaseArgs(
       };
     }
     case "copilot":
-      return { args: ["-p", prompt, "--yolo", "--model", providerModel], reasoningApplied: false };
+      return { args: ["-p", prompt, ...(auto ? ["--yolo"] : []), "--model", providerModel], reasoningApplied: false };
     case "gemini":
-      return { args: ["--approval-mode", "yolo", "-m", providerModel], reasoningApplied: false };
+      // "plan" is Gemini CLI's read-only mode.
+      return { args: ["--approval-mode", auto ? "yolo" : "plan", "-m", providerModel], reasoningApplied: false };
     case "antigravity":
-      // No permission bypass: tools needing approval are soft-denied in headless mode,
-      // which is fine for debates.
+      // Safe: no bypass flag, so tools needing approval are soft-denied in headless mode.
       return {
-        args: ["--input-format", "stream-json", "--output-format", "stream-json", "--model", providerModel],
+        args: [
+          "--input-format",
+          "stream-json",
+          "--output-format",
+          "stream-json",
+          "--model",
+          providerModel,
+          ...(auto ? ["--dangerously-skip-permissions"] : [])
+        ],
         reasoningApplied: false
       };
     case "pi": {
@@ -269,11 +288,15 @@ function buildBaseArgs(
       return { args: ["--model", providerModel, ...sessionArgs], reasoningApplied: false };
     }
     case "opencode":
-      return { args: ["run", "--dangerously-skip-permissions", "-m", providerModel], reasoningApplied: false };
+      return {
+        args: ["run", ...(auto ? ["--dangerously-skip-permissions"] : []), "-m", providerModel],
+        reasoningApplied: false
+      };
     case "droid":
-      return { args: ["exec", "--auto", "high", "-m", providerModel], reasoningApplied: false };
+      // droid exec is read-only unless given an --auto level.
+      return { args: ["exec", ...(auto ? ["--auto", "high"] : []), "-m", providerModel], reasoningApplied: false };
     case "amp":
-      return { args: ["-x", prompt, "--dangerously-allow-all"], reasoningApplied: false };
+      return { args: ["-x", prompt, ...(auto ? ["--dangerously-allow-all"] : [])], reasoningApplied: false };
     case "text":
       // Any other agent CLI: no built-in flags; the user's `args` carry model/print flags.
       return { args: [], reasoningApplied: false };

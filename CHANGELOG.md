@@ -4,8 +4,16 @@
 
 Fork of [onevcat/argue](https://github.com/onevcat/argue) by aman7892222. Headline: argue runs natively on Windows and can seat Gemini through the Antigravity CLI.
 
+### Security
+
+- **Safe permissions by default.** New provider option `permissionMode: "safe" | "auto"` (also `config add-provider --permission-mode`). Safe, the default, drops every auto-approve flag inherited from upstream: Gemini CLI `--approval-mode yolo` becomes read-only `plan`, and Copilot `--yolo`, opencode `--dangerously-skip-permissions`, Amp `--dangerously-allow-all` and droid `--auto high` are dropped. Codex stays in its read-only sandbox, and Claude runs with `--tools "" --strict-mcp-config --disable-slash-commands`, so it has no tools, MCP servers or skills. `auto` restores each CLI's own approval flags for `--action` work.
+- Debate desk API: constant-time token comparison, and requests whose `Origin` isn't the desk's own page are rejected.
+- `.gitignore` now covers `argue.config.json`, `out/`, `.argue/` and `*.events.jsonl`, so local configs and debate transcripts can't be committed by accident.
+- `npm audit fix`: the shipped dependencies have 0 known vulnerabilities. The remaining advisories are in the dev-only test runner (vitest/tinypool) and need a major upgrade.
+
 ### Features
 
+- Debate desk: ChatGPT's seat theme is now green (`#10A37F`) with a six-petal ✾ mark, matching the Claude and Gemini treatments.
 - New `argue ui` debate desk: a local web page for starting debates and watching them live, round by round. It shows each seat's claims; its judgements with stance, confidence, rationale and proposed rewording; merges; final votes with reasons; the verdict; claim tallies; and peer scores. It also lists runs started from the CLI or other sessions. It's served only on 127.0.0.1, with a per-launch API token and a Host-header check. Stopping a run also stops the agent CLIs it started.
 - Debate desk: results (verdict, claims, scores) come first, and each round folds into a one-line summary with per-seat status and stance totals, plus Expand all and Collapse all.
 - Debate desk: usage rings per seat. Claude shows 5-hour and 7-day utilization from its `rate_limit_event`, Codex shows its 5-hour and weekly `rate_limits` from its session logs, and Antigravity shows the tokens argue used today, since agy does not expose its quota. Hover a ring to see reset times.

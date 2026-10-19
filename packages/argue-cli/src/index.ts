@@ -74,6 +74,7 @@ type ConfigAddProviderOptions = {
   baseUrl?: string;
   apiKeyEnv?: string;
   cliType?: CliType;
+  permissionMode?: "safe" | "auto";
   command?: string;
   args?: string[];
   adapter?: string;
@@ -1246,6 +1247,14 @@ function parseConfigAddProviderOptions(
       continue;
     }
 
+    if (arg === "--permission-mode") {
+      const value = args[i + 1];
+      if (value !== "safe" && value !== "auto") return { ok: false, error: "--permission-mode must be safe or auto" };
+      out.permissionMode = value;
+      i += 1;
+      continue;
+    }
+
     if (arg === "--command") {
       const value = args[i + 1];
       if (!value) return { ok: false, error: "--command requires a value" };
@@ -1435,6 +1444,7 @@ function buildProviderFromOptions(options: ConfigAddProviderOptions): unknown {
     return ProviderSchema.parse({
       type: "cli",
       cliType: options.cliType,
+      ...(options.permissionMode ? { permissionMode: options.permissionMode } : {}),
       command: options.command,
       args: options.args ?? [],
       models: modelConfig
@@ -1584,7 +1594,9 @@ function printHelp(io: Pick<typeof console, "log">): void {
   io.log(
     `    api options: --vendor <${getVendorNames().join("|")}> | --protocol <openai-compatible|anthropic-compatible> [--base-url <url>] [--api-key-env <ENV_VAR>]`
   );
-  io.log(`    cli options: --cli-type <${CLI_TYPES.join("|")}> [--command <binary>] [--args a,b,c]`);
+  io.log(
+    `    cli options: --cli-type <${CLI_TYPES.join("|")}> [--command <binary>] [--args a,b,c] [--permission-mode safe|auto]`
+  );
   io.log(
     "      text: any other agent CLI; prompt on stdin, or in an arg containing {prompt}; use {providerModel} in --args"
   );
