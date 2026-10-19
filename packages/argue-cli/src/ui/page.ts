@@ -186,6 +186,7 @@ details[open] > summary::before { content: "▾ "; }
     if (opts.body) headers["content-type"] = "application/json";
     return fetch(path, { method: opts.method || "GET", headers: headers, body: opts.body ? JSON.stringify(opts.body) : undefined })
       .then(function (res) {
+        if (res.status === 401) { showStaleToken(); throw new Error("This page's access link is out of date."); }
         return res.json().then(function (data) {
           if (!res.ok) throw new Error(data && data.error ? data.error : "HTTP " + res.status);
           return data;
@@ -578,6 +579,17 @@ details[open] > summary::before { content: "▾ "; }
   function stopRun() {
     if (!confirm("Stop this debate? The agents will be terminated and no result will be written.")) return;
     api("/api/runs/" + encodeURIComponent(state.selected) + "/stop", { method: "POST" }).then(poll).catch(function (e) { alert(e.message); });
+  }
+
+  // A restarted "argue ui" prints a new link; opening it in this tab only changes the hash.
+  window.addEventListener("hashchange", function () { location.reload(); });
+  function showStaleToken() {
+    if (document.getElementById("stale-banner")) return;
+    var banner = h("div", { id: "stale-banner", class: "card verdict failed", style: "margin-bottom:18px" },
+      h("b", { text: "This page is out of date" }),
+      h("p", { class: "rationale", text: "argue ui was restarted, so this tab's access link no longer works. Open the new link printed in the terminal where argue ui is running." }));
+    var main = document.getElementById("main");
+    main.insertBefore(banner, main.firstChild);
   }
 
   if (!token) {
