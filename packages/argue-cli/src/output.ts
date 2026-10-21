@@ -1,6 +1,7 @@
 import pc from "picocolors";
 import type { ArgueEvent, ArgueResult } from "@onevcat/argue";
 import { formatMs } from "./artifacts.js";
+import { describeDrop } from "./drop-reason.js";
 import { createSpinner, type SpinnerStream } from "./spinner.js";
 
 export type OutputOptions = {
@@ -410,7 +411,7 @@ export function createOutputFormatter(io: OutputIO, options: OutputOptions = {})
       io.log("");
       io.log(c.bold("  Eliminations:"));
       for (const e of result.eliminations) {
-        io.log(`  ${c.red(e.participantId)} at round ${e.round} (${e.reason})`);
+        io.log(`  ${c.red(e.participantId)} at round ${e.round} (${describeDrop(e.reason, e.error)})`);
       }
     }
 

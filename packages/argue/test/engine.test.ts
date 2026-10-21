@@ -2103,6 +2103,57 @@ describe("graceful interrupt (onInsufficientParticipants)", () => {
     expect(result.rounds.some((r) => r.outputs.some((o) => o.phase === "final_vote"))).toBe(true);
   });
 
+  it("records why a seat dropped out (a plan limit, in the CLI's own words)", async () => {
+    type Scenario =
+      | { type: "success"; output: AgentTaskResult }
+      | { type: "timeout" }
+      | { type: "fail"; error: string };
+    const scenarios: Record<string, Scenario> = {};
+    const allClaimIds = PARTICIPANTS.map((p) => `${p}:0:0`);
+    for (const participant of PARTICIPANTS) {
+      scenarios[`round:initial:0:${participant}`] = {
+        type: "success",
+        output: roundResult(mkRoundOutput({ participantId: participant, phase: "initial", round: 0 }))
+      };
+    }
+    scenarios["round:debate:1:onevclaw"] = {
+      type: "success",
+      output: roundResult(
+        mkRoundOutput({ participantId: "onevclaw", phase: "debate", round: 1, catalogClaimIds: allClaimIds })
+      )
+    };
+    scenarios["round:debate:1:onevpaw"] = { type: "timeout" };
+    // How the CLI delegate reports a failed call: ok=false with the readable message.
+    scenarios["round:debate:1:onevtail"] = {
+      type: "fail",
+      error: "plan_limit: You've hit your session limit · resets 6:40pm (Asia/Kolkata)"
+    };
+    scenarios["round:final_vote:2:onevclaw"] = {
+      type: "success",
+      output: roundResult(
+        mkRoundOutput({ participantId: "onevclaw", phase: "final_vote", round: 2, catalogClaimIds: allClaimIds })
+      )
+    };
+
+    const engine = new ArgueEngine({ taskDelegate: new StubAgentTaskDelegate(scenarios) });
+    const result = await engine.start({
+      requestId: "req-drop-reason",
+      task: "Drop reasons",
+      participants: PARTICIPANTS.map((id) => ({ id })),
+      participantsPolicy: { minParticipants: 2 },
+      roundPolicy: { minRounds: 1, maxRounds: 2 },
+      waitingPolicy: { perTaskTimeoutMs: 1000, perRoundTimeoutMs: 1000 }
+    });
+
+    const byId = new Map(result.eliminations.map((e) => [e.participantId, e]));
+    expect(byId.get("onevtail")).toMatchObject({
+      reason: "error",
+      error: "plan_limit: You've hit your session limit · resets 6:40pm (Asia/Kolkata)"
+    });
+    expect(byId.get("onevpaw")).toMatchObject({ reason: "timeout" });
+    expect(byId.get("onevpaw")?.error).toBeUndefined();
+  });
+
   it("throws when onInsufficientParticipants is set to fail", async () => {
     const scenarios: Record<string, { type: "success"; output: AgentTaskResult } | { type: "timeout" }> = {};
 

@@ -519,7 +519,8 @@ export class ArgueEngine {
           round: args.round,
           reason,
           activeParticipants: args.activeParticipants,
-          eliminations: args.eliminations
+          eliminations: args.eliminations,
+          error: reason === "error" ? event.error : undefined
         });
 
         if (!wasActive) return;
@@ -833,17 +834,21 @@ export class ArgueEngine {
     reason: "timeout" | "error";
     activeParticipants: Set<string>;
     eliminations: EliminationRecord[];
+    error?: string;
   }): void {
     if (!args.activeParticipants.has(args.participantId)) {
       return;
     }
 
     args.activeParticipants.delete(args.participantId);
+    // The result keeps a short reason; the full text stays in the ParticipantEliminated event.
+    const error = args.error?.trim().replace(/\s+/g, " ").slice(0, 300);
     args.eliminations.push({
       participantId: args.participantId,
       round: args.round,
       reason: args.reason,
-      at: new Date(this.now()).toISOString()
+      at: new Date(this.now()).toISOString(),
+      ...(error ? { error } : {})
     });
   }
 

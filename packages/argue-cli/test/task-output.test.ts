@@ -1,5 +1,5 @@
 import type { AgentTaskInput } from "@onevcat/argue";
-import { describe, expect, it } from "vitest";
+import { describe, expect, it, vi } from "vitest";
 import { parseJsonObject } from "../src/runtime/json.js";
 import { normalizeTaskOutput, normalizeTaskOutputFromText } from "../src/runtime/task-output.js";
 
@@ -104,6 +104,31 @@ describe("runtime/task-output", () => {
       summary: "sum"
     });
     expect(() => normalizeTaskOutput(task, parsed)).toThrow();
+  });
+
+  it("keeps a seat's answer when one judgement is malformed, and says what was set aside", () => {
+    const task = { ...makeInitialTask(), phase: "debate", round: 2 } as AgentTaskInput;
+    const good = { claimId: "c1", stance: "agree", confidence: 0.8, rationale: "holds up" };
+    const logged: string[] = [];
+    const spy = vi.spyOn(process.stderr, "write").mockImplementation((chunk) => {
+      logged.push(String(chunk));
+      return true;
+    });
+    try {
+      const output = normalizeTaskOutput(task, {
+        fullResponse: "full",
+        summary: "sum",
+        judgements: [good, { claimId: "c2", confidence: 0.4, rationale: "stance missing" }]
+      });
+      expect(output.kind === "round" && output.output.judgements).toEqual([good]);
+      expect(logged.join("")).toMatch(/a1 \(round 2\): kept its answer, set aside judgements\[1\]: stance/);
+      // With no usable judgement left the answer still fails, so the seat drops out as before.
+      expect(() =>
+        normalizeTaskOutput(task, { fullResponse: "f", summary: "s", judgements: [{ claimId: "c2" }] })
+      ).toThrow();
+    } finally {
+      spy.mockRestore();
+    }
   });
 
   it("keeps action output stable when already normalized", () => {

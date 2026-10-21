@@ -1,6 +1,7 @@
 import { mkdir, writeFile } from "node:fs/promises";
 import { dirname } from "node:path";
 import type { ArgueResult } from "@onevcat/argue";
+import { describeDrop } from "./drop-reason.js";
 
 export async function writeRunArtifacts(args: {
   result: ArgueResult;
@@ -134,7 +135,7 @@ export function buildResultSummary(result: ArgueResult): string {
   if (result.eliminations.length > 0) {
     lines.push("", "## Eliminations", "");
     for (const e of result.eliminations) {
-      lines.push(`- ${e.participantId}: ${e.reason} (round ${e.round})`);
+      lines.push(`- ${e.participantId}: ${describeDrop(e.reason, e.error)} (round ${e.round})`);
     }
   }
 

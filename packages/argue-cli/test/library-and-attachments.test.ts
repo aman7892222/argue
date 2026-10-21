@@ -213,6 +213,57 @@ describe("library", () => {
     expect(citedMdToHtml("No citations here, and `code` stays code.", cite)).toBeNull();
   });
 
+  it("lists a saved debate again after its debate.json changes", async () => {
+    const dir = await mkdtemp(join(tmpdir(), "argue-library-cache-"));
+    const { folder } = await saveToLibrary({ dir, result: RESULT, seats: [], attachments: [], browser: null });
+    expect((await listLibrary(dir))[0]).toMatchObject({ status: "consensus", title: "Weekend stack" });
+
+    const file = join(folder, "debate.json");
+    const saved = JSON.parse(await readFile(file, "utf8")) as { result: typeof RESULT };
+    saved.result = {
+      ...saved.result,
+      status: "unresolved",
+      task: { ...saved.result.task, title: "A longer, changed title" }
+    };
+    await writeFile(file, JSON.stringify(saved));
+    expect((await listLibrary(dir))[0]).toMatchObject({ status: "unresolved", title: "A longer, changed title" });
+  });
+
+  it("says in the saved report which seats dropped out and why", () => {
+    const html = renderReportHtml(
+      {
+        ...RESULT,
+        status: "interrupted",
+        eliminations: [
+          {
+            participantId: "b",
+            round: 4,
+            reason: "error",
+            error: "plan_limit: You've hit your session limit · resets 6:40pm"
+          },
+          { participantId: "c", round: 2, reason: "timeout" }
+        ]
+      },
+      { reasoning: false }
+    );
+    expect(html).toContain(
+      "Dropped out: <b>b</b> in round 4, plan limit reached (You&#39;ve hit your session limit · resets 6:40pm)"
+    );
+    expect(html).toContain("<b>c</b> in round 2, did not answer in time");
+  });
+
+  it("shows the model and effort each seat used in the saved report", () => {
+    const html = renderReportHtml(RESULT, {
+      reasoning: false,
+      seats: [
+        { id: "a", model: "opus", effort: "xhigh", cli: "claude" },
+        { id: "b", model: "gpt-6-astra", cli: "codex" }
+      ]
+    });
+    expect(html).toContain("a<small>Opus 5.5 · Extra high</small>");
+    expect(html).toContain("b<small>gpt-6-astra</small>");
+  });
+
   it("makes safe folder names and never writes outside the library", () => {
     expect(debateFolderName('a/b\\c:d*e?"<>|. ', new Date(2026, 9, 19, 14, 48))).toBe("2026-10-19 14.48 a b c d e");
     expect(debateFolderName("", new Date(2026, 0, 2, 3, 4))).toBe("2026-01-02 03.04 debate");

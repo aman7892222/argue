@@ -1,7 +1,23 @@
-import { access } from "node:fs/promises";
-import { extname, join, normalize } from "node:path";
+import { access, mkdir, readFile } from "node:fs/promises";
+import { homedir } from "node:os";
+import { dirname, extname, join, normalize } from "node:path";
 import spawn from "cross-spawn";
+import { writeFileAtomic } from "./atomic-write.js";
 import type { CliType } from "./config.js";
+
+/** What the desk shows for a model in its pickers. */
+export interface ModelInfo {
+  /** Display name, e.g. "Opus 5.5". */
+  label?: string;
+  /** One line under the name, e.g. "Latest Haiku: fastest and lightest". */
+  detail?: string;
+  /** Heading the model is listed under, e.g. "Earlier models". */
+  group?: string;
+  /** Effort levels this model accepts; an empty list means it has no effort setting. */
+  efforts?: string[];
+  /** One line per effort level, when the CLI describes them (Codex does). */
+  effortDetails?: Record<string, string>;
+}
 
 /** A known agent CLI that argue can seat as a participant. */
 export interface KnownCli {
@@ -28,8 +44,12 @@ export interface KnownCli {
   parseEfforts?: (stdout: string) => Record<string, string[]>;
   /** Effort is part of the model id (gemini-4-argon-high), so the desk shows it as model + effort. */
   effortInModelName?: boolean;
-  /** Short warnings shown next to specific models. */
-  modelNotes?: Record<string, string>;
+  /** Names, details and effort levels for known model ids (overridden by `parseModelInfo`). */
+  modelInfo?: Record<string, ModelInfo>;
+  /** Names and details read from the model listing. */
+  parseModelInfo?: (stdout: string) => Record<string, ModelInfo>;
+  /** Aliases the CLI accepts and the model each one means today (opus -> claude-opus-5-5). */
+  modelAliases?: Record<string, string>;
   /** Shown when the CLI cannot list models (where to find valid ids). */
   modelHint?: string;
   install: string;
@@ -38,14 +58,67 @@ export interface KnownCli {
   knownPaths?: string[];
 }
 
+const CLAUDE_EFFORTS = ["low", "medium", "high", "xhigh", "max"];
+const LATEST = "Latest";
+const EARLIER = "Earlier models";
+
+/** Claude models Claude Code accepts by full id, with the effort levels each one supports. */
+const CLAUDE_MODELS: Record<string, ModelInfo> = {
+  "claude-opus-5-5": {
+    label: "Opus 5.5",
+    detail: "Latest Opus: deep reasoning for hard problems",
+    group: LATEST,
+    efforts: CLAUDE_EFFORTS
+  },
+  "claude-sonnet-5-5": {
+    label: "Sonnet 5.5",
+    detail: "Latest Sonnet: fast, for everyday work",
+    group: LATEST,
+    efforts: CLAUDE_EFFORTS
+  },
+  "claude-haiku-5-5": {
+    label: "Haiku 5.5",
+    detail: "Latest Haiku: fastest and lightest",
+    group: LATEST,
+    efforts: CLAUDE_EFFORTS
+  },
+  "claude-fable-5-1": {
+    label: "Fable 5.1",
+    detail: "Most capable; may bill extra usage credits on some plans",
+    group: LATEST,
+    efforts: CLAUDE_EFFORTS
+  },
+  "claude-opus-5": { label: "Opus 5", group: EARLIER, efforts: CLAUDE_EFFORTS },
+  "claude-sonnet-5": { label: "Sonnet 5", group: EARLIER, efforts: CLAUDE_EFFORTS },
+  "claude-fable-5": {
+    label: "Fable 5",
+    detail: "May bill extra usage credits on some plans",
+    group: EARLIER,
+    efforts: CLAUDE_EFFORTS
+  },
+  "claude-opus-4-8": { label: "Opus 4.8", group: EARLIER, efforts: CLAUDE_EFFORTS },
+  "claude-opus-4-7": { label: "Opus 4.7", group: EARLIER, efforts: CLAUDE_EFFORTS },
+  // Extra high (xhigh) arrived with Opus 4.7.
+  "claude-opus-4-6": { label: "Opus 4.6", group: EARLIER, efforts: ["low", "medium", "high", "max"] },
+  "claude-sonnet-4-6": { label: "Sonnet 4.6", group: EARLIER, efforts: ["low", "medium", "high", "max"] },
+  "claude-haiku-4-5": { label: "Haiku 4.5", detail: "No effort setting", group: EARLIER, efforts: [] }
+};
+
 export const KNOWN_CLIS: KnownCli[] = [
   {
     cliType: "claude",
     command: "claude",
     label: "Claude Code",
-    suggestedModels: ["opus", "sonnet", "haiku", "fable"],
-    efforts: ["low", "medium", "high", "xhigh", "max"],
-    modelNotes: { fable: "may bill extra usage credits on some plans" },
+    // Claude Code cannot list its models, so this is the current lineup (full ids pin a version).
+    suggestedModels: Object.keys(CLAUDE_MODELS),
+    modelInfo: CLAUDE_MODELS,
+    modelAliases: {
+      opus: "claude-opus-5-5",
+      sonnet: "claude-sonnet-5-5",
+      haiku: "claude-haiku-5-5",
+      fable: "claude-fable-5-1"
+    },
+    efforts: CLAUDE_EFFORTS,
     // The native installer puts claude here without always adding it to PATH.
     knownPaths: ["{home}/.local/bin/claude.exe", "{home}/.local/bin/claude"],
     install: "irm https://claude.ai/install.ps1 | iex  (macOS/Linux: curl -fsSL https://claude.ai/install.sh | bash)",
@@ -58,6 +131,7 @@ export const KNOWN_CLIS: KnownCli[] = [
     listModelsArgs: ["debug", "models"],
     parseModels: parseCodexModelCatalog,
     parseEfforts: parseCodexEffortLevels,
+    parseModelInfo: parseCodexModelInfo,
     modelHint: "run `codex` and use /model to see ids available on your plan",
     install: "npm install -g @openai/codex@latest, then `codex login`"
   },
@@ -67,6 +141,7 @@ export const KNOWN_CLIS: KnownCli[] = [
     label: "Google Antigravity",
     listModelsArgs: ["models"],
     parseModels: parseTabularModels,
+    parseModelInfo: parseTabularModelNames,
     effortInModelName: true,
     knownPaths: ["{localappdata}/agy/bin/agy.exe", "{home}/.local/bin/agy"],
     install:
@@ -208,6 +283,30 @@ export function catalogId(cli: KnownCli): string {
   return cli.id ?? cli.cliType;
 }
 
+/** How effort levels are written for people (the CLIs take the lower-case ids). */
+export const EFFORT_LABELS: Record<string, string> = {
+  minimal: "Minimal",
+  low: "Low",
+  medium: "Medium",
+  high: "High",
+  xhigh: "Extra high",
+  max: "Max",
+  ultra: "Ultra"
+};
+
+export function effortLabel(effort: string): string {
+  return EFFORT_LABELS[effort] ?? effort.charAt(0).toUpperCase() + effort.slice(1);
+}
+
+/** A model's display name from the built-in catalog ("opus" and "claude-opus-5-5" are "Opus 5.5"). */
+export function modelLabel(model: string, catalog: KnownCli[] = KNOWN_CLIS): string {
+  for (const cli of catalog) {
+    const label = cli.modelInfo?.[cli.modelAliases?.[model] ?? model]?.label;
+    if (label) return label;
+  }
+  return model;
+}
+
 /** `ollama list`: a NAME/ID/SIZE/MODIFIED table; take the NAME column, dropping ":latest". */
 export function parseOllamaList(stdout: string): string[] {
   const names = stdout
@@ -243,8 +342,18 @@ export function parseTabularModels(stdout: string): string[] {
   return [...new Set(ids)];
 }
 
-/** Parses `codex debug models` JSON, keeping only models Codex shows in its picker. */
-export function parseCodexModelCatalog(stdout: string): string[] {
+/** "model-id<whitespace>Display Name" lines (`agy models`): the display name of each id. */
+export function parseTabularModelNames(stdout: string): Record<string, ModelInfo> {
+  const out: Record<string, ModelInfo> = {};
+  for (const raw of stdout.split(/\r?\n/)) {
+    const match = /^([\w.\-/:@]+)\s+(\S.*)$/.exec(raw.trim());
+    if (match && !raw.trim().endsWith("...")) out[match[1]!] = { label: match[2]!.trim().slice(0, 80) };
+  }
+  return out;
+}
+
+/** Picker-visible entries of `codex debug models` JSON. */
+function codexListed(stdout: string): Array<Record<string, unknown> & { slug: string }> {
   let parsed: unknown;
   try {
     parsed = JSON.parse(stdout);
@@ -253,25 +362,45 @@ export function parseCodexModelCatalog(stdout: string): string[] {
   }
   const list = Array.isArray(parsed) ? parsed : (parsed as { models?: unknown })?.models;
   if (!Array.isArray(list)) return [];
-  return list
-    .filter((m): m is { slug: string; visibility?: unknown } => typeof m?.slug === "string")
-    .filter((m) => m.visibility === undefined || m.visibility === "list")
-    .map((m) => m.slug);
+  return list.filter(
+    (m): m is Record<string, unknown> & { slug: string } =>
+      typeof m?.slug === "string" && (m.visibility === undefined || m.visibility === "list")
+  );
+}
+
+/** `codex debug models` JSON: each model's display name and description, and what each effort level does. */
+export function parseCodexModelInfo(stdout: string): Record<string, ModelInfo> {
+  const text = (value: unknown): string | undefined =>
+    typeof value === "string" && value.trim() ? value.trim().slice(0, 120) : undefined;
+  const out: Record<string, ModelInfo> = {};
+  for (const m of codexListed(stdout)) {
+    const effortDetails: Record<string, string> = {};
+    for (const level of Array.isArray(m.supported_reasoning_levels) ? m.supported_reasoning_levels : []) {
+      const l = level as { effort?: unknown; description?: unknown };
+      const detail = text(l?.description);
+      if (typeof l?.effort === "string" && detail) effortDetails[l.effort] = detail;
+    }
+    const label = text(m.display_name);
+    const detail = text(m.description);
+    // Only what Codex said, so it never blanks out catalog values when merged.
+    out[m.slug] = {
+      ...(label ? { label } : {}),
+      ...(detail ? { detail } : {}),
+      ...(Object.keys(effortDetails).length ? { effortDetails } : {})
+    };
+  }
+  return out;
+}
+
+/** Parses `codex debug models` JSON, keeping only models Codex shows in its picker. */
+export function parseCodexModelCatalog(stdout: string): string[] {
+  return codexListed(stdout).map((m) => m.slug);
 }
 
 /** `codex debug models` JSON: picker-visible model -> its supported reasoning levels. */
 export function parseCodexEffortLevels(stdout: string): Record<string, string[]> {
-  let parsed: unknown;
-  try {
-    parsed = JSON.parse(stdout);
-  } catch {
-    return {};
-  }
-  const list = Array.isArray(parsed) ? parsed : (parsed as { models?: unknown })?.models;
-  if (!Array.isArray(list)) return {};
   const out: Record<string, string[]> = {};
-  for (const m of list as Array<{ slug?: unknown; visibility?: unknown; supported_reasoning_levels?: unknown }>) {
-    if (typeof m?.slug !== "string" || (m.visibility !== undefined && m.visibility !== "list")) continue;
+  for (const m of codexListed(stdout)) {
     const levels = Array.isArray(m.supported_reasoning_levels) ? m.supported_reasoning_levels : [];
     out[m.slug] = levels
       .map((l) => (typeof l === "string" ? l : (l as { effort?: unknown })?.effort))
@@ -331,7 +460,10 @@ export interface DetectedCli {
   models: string[];
   modelsSource: "listed" | "suggested" | "none";
   efforts: string[];
+  /** Effort levels per model; a model listed with [] has no effort setting. */
   effortsByModel: Record<string, string[]>;
+  /** Display names and details per model id (catalog first, then what the CLI listed). */
+  modelInfo: Record<string, ModelInfo>;
   listError?: string;
 }
 
@@ -347,26 +479,128 @@ export async function detectClis(options: {
     catalog.map(async (cli): Promise<DetectedCli> => {
       const path = (await findOnPath(cli.command, env)) ?? (await findKnownPath(cli.knownPaths, env));
       const suggested = cli.suggestedModels ?? [];
+      const staticEfforts: Record<string, string[]> = {};
+      for (const [model, info] of Object.entries(cli.modelInfo ?? {})) {
+        if (info.efforts) staticEfforts[model] = info.efforts;
+      }
       const fallback: DetectedCli = {
         cli,
         path,
         models: suggested,
         modelsSource: suggested.length > 0 ? "suggested" : "none",
         efforts: cli.efforts ?? [],
-        effortsByModel: {}
+        effortsByModel: staticEfforts,
+        modelInfo: { ...cli.modelInfo }
       };
       if (!path || !list || !cli.listModelsArgs || !cli.parseModels) return fallback;
 
       try {
         const stdout = await captureStdout(path, cli.listModelsArgs, env, timeoutMs);
         const models = cli.parseModels(stdout);
-        const effortsByModel = cli.parseEfforts?.(stdout) ?? {};
-        return models.length > 0 ? { ...fallback, models, modelsSource: "listed", effortsByModel } : fallback;
+        if (models.length === 0) return fallback;
+        const listedInfo = cli.parseModelInfo?.(stdout) ?? {};
+        const modelInfo = { ...fallback.modelInfo };
+        for (const [model, info] of Object.entries(listedInfo)) modelInfo[model] = { ...modelInfo[model], ...info };
+        return {
+          ...fallback,
+          models,
+          modelsSource: "listed",
+          effortsByModel: { ...staticEfforts, ...cli.parseEfforts?.(stdout) },
+          modelInfo
+        };
       } catch (error) {
         return { ...fallback, listError: error instanceof Error ? error.message : String(error) };
       }
     })
   );
+}
+
+/** Where the last model listing is kept, so the desk can show full pickers before a new scan ends. */
+export function modelsCachePath(env: NodeJS.ProcessEnv = process.env): string {
+  return env.ARGUE_MODELS_CACHE ?? join(homedir(), ".argue", "models-cache.json");
+}
+
+type CachedListing = Pick<DetectedCli, "models" | "effortsByModel" | "modelInfo"> & { path: string };
+
+/** Keeps what each CLI listed (agy models, codex debug models) for the next desk launch. */
+export async function saveModelsCache(file: string, detected: DetectedCli[]): Promise<void> {
+  const listed: Record<string, CachedListing> = {};
+  for (const d of detected) {
+    if (d.path && d.modelsSource === "listed") {
+      listed[catalogId(d.cli)] = {
+        path: d.path,
+        models: d.models,
+        effortsByModel: d.effortsByModel,
+        modelInfo: d.modelInfo
+      };
+    }
+  }
+  await mkdir(dirname(file), { recursive: true });
+  await writeFileAtomic(file, `${JSON.stringify({ version: 1, listed })}\n`);
+}
+
+/** Display names from the last listing ({ codex: { "gpt-6-luna": "GPT-6-Luna" } }), for saved reports. */
+export async function cachedModelLabels(file: string): Promise<Record<string, Record<string, string>>> {
+  const out: Record<string, Record<string, string>> = {};
+  try {
+    const raw = JSON.parse(await readFile(file, "utf8")) as { version?: unknown; listed?: Record<string, unknown> };
+    if (raw?.version !== 1 || !raw.listed || typeof raw.listed !== "object") return out;
+    for (const [cli, entry] of Object.entries(raw.listed)) {
+      const info = (entry as { modelInfo?: unknown })?.modelInfo;
+      if (!info || typeof info !== "object") continue;
+      for (const [model, value] of Object.entries(info as Record<string, { label?: unknown }>)) {
+        if (typeof value?.label === "string") (out[cli] ??= {})[model] = value.label.slice(0, 120);
+      }
+    }
+  } catch {
+    // no listing yet: reports fall back to the built-in names
+  }
+  return out;
+}
+
+/**
+ * Gives quick detections (no listing) the models each CLI listed last time, while it is still at
+ * the same path. Anything malformed in the file is ignored.
+ */
+export async function withCachedListings(file: string, detected: DetectedCli[]): Promise<DetectedCli[]> {
+  let listed: Record<string, Partial<CachedListing>>;
+  try {
+    const raw = JSON.parse(await readFile(file, "utf8")) as { version?: unknown; listed?: unknown };
+    if (raw?.version !== 1 || !raw.listed || typeof raw.listed !== "object") return detected;
+    listed = raw.listed as Record<string, Partial<CachedListing>>;
+  } catch {
+    return detected;
+  }
+  const ids = (value: unknown, pattern: RegExp): string[] | null =>
+    Array.isArray(value) && value.every((v) => typeof v === "string" && pattern.test(v)) ? (value as string[]) : null;
+  return detected.map((d) => {
+    const cached = Object.prototype.hasOwnProperty.call(listed, catalogId(d.cli))
+      ? listed[catalogId(d.cli)]
+      : undefined;
+    const models = ids(cached?.models, /^[\w.\-/:@]+$/);
+    if (!d.path || !cached || cached.path !== d.path || !models?.length) return d;
+    const effortsByModel = { ...d.effortsByModel };
+    for (const [model, levels] of Object.entries(cached.effortsByModel ?? {})) {
+      const valid = ids(levels, /^[a-z]{1,20}$/);
+      if (valid) effortsByModel[model] = valid;
+    }
+    const modelInfo = { ...d.modelInfo };
+    for (const [model, info] of Object.entries(cached.modelInfo ?? {})) {
+      if (!info || typeof info !== "object") continue;
+      const text = (v: unknown): string | undefined => (typeof v === "string" ? v.slice(0, 120) : undefined);
+      const details = info.effortDetails && typeof info.effortDetails === "object" ? info.effortDetails : {};
+      modelInfo[model] = {
+        ...modelInfo[model],
+        ...(text(info.label) ? { label: text(info.label) } : {}),
+        ...(text(info.detail) ? { detail: text(info.detail) } : {}),
+        ...(text(info.group) ? { group: text(info.group) } : {}),
+        effortDetails: Object.fromEntries(
+          Object.entries(details).filter((entry): entry is [string, string] => typeof entry[1] === "string")
+        )
+      };
+    }
+    return { ...d, models, modelsSource: "listed", effortsByModel, modelInfo };
+  });
 }
 
 function captureStdout(command: string, args: string[], env: NodeJS.ProcessEnv, timeoutMs: number): Promise<string> {

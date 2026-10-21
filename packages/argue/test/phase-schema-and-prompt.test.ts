@@ -8,7 +8,7 @@ import {
 } from "../src/contracts/result.js";
 import type { ParticipantRoundOutput } from "../src/contracts/result.js";
 import type { AgentTaskResult } from "../src/contracts/task.js";
-import { InitialRoundOutputContentJsonSchema } from "../src/contracts/task.js";
+import { InitialRoundOutputContentJsonSchema, salvageRoundOutputContent } from "../src/contracts/task.js";
 import { StubAgentTaskDelegate } from "./helpers/stub-agent.js";
 
 function mkRoundResult(output: ParticipantRoundOutput): AgentTaskResult {
@@ -389,5 +389,52 @@ describe("built-in prompt templates", () => {
       | Record<string, unknown>
       | undefined;
     expect((finalVoteSchema?.properties as Record<string, unknown> | undefined)?.claimVotes).toBeDefined();
+  });
+});
+
+describe("salvageRoundOutputContent", () => {
+  const judgement = { claimId: "c1", stance: "agree", confidence: 0.8, rationale: "holds up" };
+
+  it("sets aside malformed entries so the answer still counts", () => {
+    const salvaged = salvageRoundOutputContent("debate", {
+      fullResponse: "full",
+      summary: "sum",
+      judgements: [judgement, { claimId: "c2", confidence: 0.5, rationale: "no stance" }]
+    });
+    expect(salvaged?.content.judgements).toEqual([judgement]);
+    expect(salvaged?.setAside).toEqual([expect.stringMatching(/^judgements\[1\]: stance: /)]);
+
+    const vote = salvageRoundOutputContent("final_vote", {
+      fullResponse: "full",
+      summary: "sum",
+      judgements: [],
+      claimVotes: [{ claimId: "c1", vote: "accept" }, { vote: "maybe" }]
+    });
+    expect(vote?.content.claimVotes).toEqual([{ claimId: "c1", vote: "accept" }]);
+  });
+
+  it("shortens an over-long task title instead of failing the opening answer", () => {
+    const salvaged = salvageRoundOutputContent("initial", {
+      fullResponse: "full",
+      summary: "sum",
+      taskTitle: "x".repeat(80),
+      extractedClaims: [],
+      judgements: []
+    });
+    expect((salvaged?.content.taskTitle as string).length).toBe(60);
+    expect(salvaged?.setAside).toEqual(["taskTitle: shortened to 60 characters"]);
+  });
+
+  it("gives up when nothing usable is left or nothing was wrong with the entries", () => {
+    // A debate answer needs at least one judgement, a final vote at least one vote.
+    expect(
+      salvageRoundOutputContent("debate", { fullResponse: "f", summary: "s", judgements: [{ claimId: "c1" }] })
+    ).toBeNull();
+    expect(
+      salvageRoundOutputContent("final_vote", { fullResponse: "f", summary: "s", judgements: [], claimVotes: [{}] })
+    ).toBeNull();
+    // Missing required fields are not something to set aside.
+    expect(salvageRoundOutputContent("debate", { judgements: [judgement] })).toBeNull();
+    expect(salvageRoundOutputContent("debate", "not an object")).toBeNull();
   });
 });

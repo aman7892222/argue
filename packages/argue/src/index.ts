@@ -48,7 +48,8 @@ export {
   RoundTaskInputSchema,
   RoundTaskResultSchema,
   getRoundOutputContentJsonSchema,
-  getRoundOutputContentSchemaRef
+  getRoundOutputContentSchemaRef,
+  salvageRoundOutputContent
 } from "./contracts/task.js";
 
 export type { ActionOutput, Task } from "./contracts/result.js";

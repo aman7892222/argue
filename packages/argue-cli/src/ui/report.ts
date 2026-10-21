@@ -1,3 +1,5 @@
+import { effortLabel, modelLabel } from "../cli-catalog.js";
+import { describeDrop } from "../drop-reason.js";
 import { knotSvg, themeForSeat, type SeatTheme } from "./themes.js";
 
 /**
@@ -48,10 +50,10 @@ type Result = {
   report?: { finalSummary?: string; representativeSpeech?: string };
   rounds?: Array<{ round: number; outputs?: Output[] }>;
   metrics?: { elapsedMs?: number; totalRounds?: number };
-  eliminations?: Array<{ participantId?: string; round?: number; reason?: string }>;
+  eliminations?: Array<{ participantId?: string; round?: number; reason?: string; error?: string }>;
 };
 
-export type ReportSeat = { id: string; model?: string; cli?: string };
+export type ReportSeat = { id: string; model?: string; effort?: string; cli?: string; label?: string };
 
 const STATUS: Record<string, string> = {
   consensus: "Consensus",
@@ -204,7 +206,16 @@ export function renderReportHtml(
 ): string {
   const seats = new Map((options.seats ?? []).map((s) => [s.id, s]));
   const themeOf = (id: string): SeatTheme | null => themeForSeat(seats.get(id)?.model, seats.get(id)?.cli);
-  const chip = (id: string): string => `<span class="chip">${markHtml(themeOf(id), id)}${esc(id)}</span>`;
+  // "Opus 5.5 · High": the model and effort the seat ran with.
+  const used = (id: string): string => {
+    const seat = seats.get(id);
+    if (!seat?.model) return "";
+    return [seat.label || modelLabel(seat.model), seat.effort ? effortLabel(seat.effort) : ""]
+      .filter(Boolean)
+      .join(" · ");
+  };
+  const chip = (id: string): string =>
+    `<span class="chip">${markHtml(themeOf(id), id)}${esc(id)}${used(id) ? `<small>${esc(used(id))}</small>` : ""}</span>`;
   const colorOf = (id: string): string => {
     const t = themeOf(id);
     return t?.gradient ? `linear-gradient(90deg,${t.gradient.join(",")})` : (t?.color ?? "#5b6573");
@@ -250,6 +261,12 @@ export function renderReportHtml(
             `<span class="chip${ids.length ? "" : " none"}" title="${esc(ids.map((c) => claimTitles.get(c) || c).join("\n"))}">${markHtml(themeOf(id), id)}${esc(id)}<small>${ids.length} of ${agreed.length}</small></span>`
         )
         .join("")}</div>`
+    : "";
+  // Seats that left the debate, and why (a plan limit reads in the CLI's own words).
+  const dropped = (result.eliminations ?? []).length
+    ? `<p class="meta dropped">Dropped out: ${(result.eliminations ?? [])
+        .map((e) => `<b>${esc(e.participantId)}</b> in round ${esc(e.round)}, ${esc(describeDrop(e.reason, e.error))}`)
+        .join("; ")}</p>`
     : "";
   const speech = result.report?.representativeSpeech
     ? (citedMdToHtml(result.report.representativeSpeech, cite) ?? mdToHtml(result.report.representativeSpeech))
@@ -345,7 +362,7 @@ h4{font-size:10.5px;text-transform:uppercase;letter-spacing:.1em;color:var(--mut
 .chip{display:inline-flex;align-items:center;gap:6px;padding:2px 10px 2px 3px;border:1px solid var(--line);border-radius:999px;background:#fffdf9;font-weight:650;font-size:12.5px}
 .mark{width:19px;height:19px;border-radius:50%;display:inline-grid;place-items:center;font-size:11px;font-weight:700}
 .card{background:#fffdf9;border:1px solid var(--line);border-radius:14px;padding:18px 22px}
-.verdict{border-left:5px solid #2f7d4a}.verdict.partial_consensus,.verdict.interrupted,.verdict.unresolved{border-left-color:#a8650a}.verdict.failed{border-left-color:#b93a32}
+.verdict{border-left:5px solid #2f7d4a}.verdict.partial_consensus,.verdict.interrupted,.verdict.unresolved{border-left-color:#a8650a}.verdict.failed{border-left-color:#b93a32}.verdict .dropped{margin-top:12px}
 .big{font:400 19px/1.55 var(--serif);margin:8px 0 0}.pre{white-space:pre-wrap}.speech{font:400 15.5px/1.65 var(--serif);color:var(--ink2);white-space:pre-wrap}
 .pill{display:inline-block;font-size:11.5px;font-weight:700;padding:1px 9px;border-radius:999px;background:var(--soft);color:var(--muted)}
 .pill.ok{background:#e5f2e8;color:#2f7d4a}.pill.no{background:#fbe9e7;color:#b93a32}.pill.rev{background:#fbf0dc;color:#a8650a}
@@ -378,7 +395,7 @@ ${result.task?.title && result.task.prompt && result.task.prompt !== result.task
 <p class="meta">${esc(date)}${elapsed ? ` · ${esc(elapsed)}` : ""}${result.metrics?.totalRounds ? ` · ${result.metrics.totalRounds} rounds` : ""}</p>
 ${attachments}
 <h2>Verdict</h2>
-<div class="card verdict ${esc(result.status)}"><p class="meta">Written by <b>${esc(result.representative?.participantId)}</b>, the top peer score</p>${result.report?.finalSummary ? `<p class="big">${esc(result.report.finalSummary)}</p>` : ""}${sources}</div>
+<div class="card verdict ${esc(result.status)}"><p class="meta">Written by <b>${esc(result.representative?.participantId)}</b>, the top peer score</p>${result.report?.finalSummary ? `<p class="big">${esc(result.report.finalSummary)}</p>` : ""}${sources}${dropped}</div>
 ${speech ? `<h2>Full report</h2><div class="card md">${speech}</div>` : ""}
 ${claimsRows ? `<h2>Claims and how they were resolved</h2><div class="card" style="padding:0"><table>${claimsRows}</table></div>` : ""}
 ${scores ? `<h2>Peer scores</h2><div class="scores">${scores}</div>` : ""}

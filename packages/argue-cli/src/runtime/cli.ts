@@ -5,6 +5,7 @@ import { dirname, join } from "node:path";
 // escaping args for cmd.exe; on other platforms it delegates to child_process.spawn.
 import spawn from "cross-spawn";
 import { defaultCliCommand, type CliProviderConfig } from "../config.js";
+import { PLAN_LIMIT_PREFIX } from "../drop-reason.js";
 import { recordAntigravityTokens, recordClaudeRateLimit } from "../usage.js";
 import { buildTaskPrompt } from "./prompt.js";
 import { normalizeTaskOutput, normalizeTaskOutputFromText } from "./task-output.js";
@@ -79,6 +80,8 @@ export function createCliRunner(raw: CliProviderConfig): ProviderTaskRunner {
             ? attachmentDirs(debateAttachments())[0]
             : undefined,
         abortSignal
+      }).catch(async (error: unknown) => {
+        throw await explainCliFailure(provider.cliType, error);
       });
 
       if (provider.cliType === "antigravity") {
@@ -88,9 +91,10 @@ export function createCliRunner(raw: CliProviderConfig): ProviderTaskRunner {
       }
 
       if (provider.cliType === "claude") {
-        const parsed = parseClaudeStream(result.stdout);
-        if (parsed.rateLimit) await recordClaudeRateLimit(parsed.rateLimit);
-        return normalizeTaskOutputFromText(task, parsed.response);
+        const stream = readClaudeStream(result.stdout);
+        if (stream.rateLimit) await recordClaudeRateLimit(stream.rateLimit);
+        if (stream.failure) throw claudeFailure(stream.failure);
+        return normalizeTaskOutputFromText(task, stream.response ?? result.stdout);
       }
 
       if (provider.cliType === "generic") {
@@ -135,9 +139,9 @@ export function parseAntigravityResult(stdout: string): { response: string; tota
 
     const result = (event as { result?: { status?: unknown; response?: unknown; error?: unknown } }).result ?? {};
     if (result.status !== "SUCCESS") {
-      throw new Error(
-        `antigravity CLI returned status=${String(result.status ?? "missing")} error=${String(result.error ?? "empty")}`
-      );
+      const error = String(result.error ?? "empty");
+      if (LIMIT_WORDS.test(error)) throw new Error(PLAN_LIMIT_PREFIX + tidyLimitText(error));
+      throw new Error(`antigravity CLI returned status=${String(result.status ?? "missing")} error=${error}`);
     }
     if (typeof result.response !== "string") {
       throw new Error("antigravity CLI result event has no string response");
@@ -158,25 +162,116 @@ export function parseAntigravityResult(stdout: string): { response: string; tota
  * Output that is not stream-json (e.g. a wrapper script) is used as the answer verbatim.
  */
 export function parseClaudeStream(stdout: string): { response: string; rateLimit: unknown } {
+  const stream = readClaudeStream(stdout);
+  if (stream.failure) throw claudeFailure(stream.failure);
+  return { response: stream.response ?? stdout, rateLimit: stream.rateLimit };
+}
+
+type ClaudeFailure = { message: string; limit: boolean };
+
+/**
+ * Claude's stream, read without throwing: the answer, the latest plan utilization, and the
+ * error it reported, if any. Claude also exits non-zero then, so this runs on failures too.
+ */
+function readClaudeStream(stdout: string): {
+  response: string | null;
+  rateLimit: unknown;
+  failure: ClaudeFailure | null;
+} {
   let response: string | null = null;
   let rateLimit: unknown = null;
+  let rejected = false;
+  let failure: ClaudeFailure | null = null;
   for (const line of stdout.split(/\r?\n/)) {
     if (!line.startsWith("{")) continue;
-    let event: { type?: unknown; result?: unknown; is_error?: unknown; rate_limit_info?: unknown };
+    let event: {
+      type?: unknown;
+      result?: unknown;
+      is_error?: unknown;
+      api_error_status?: unknown;
+      rate_limit_info?: { status?: unknown };
+    };
     try {
       event = JSON.parse(line) as typeof event;
     } catch {
       continue;
     }
-    if (event.type === "rate_limit_event") rateLimit = event.rate_limit_info;
+    if (event.type === "rate_limit_event") {
+      rateLimit = event.rate_limit_info;
+      rejected ||= event.rate_limit_info?.status === "rejected";
+    }
     if (event.type === "result") {
       if (event.is_error === true) {
-        throw new Error(`claude CLI returned an error result: ${String(event.result ?? "no details")}`);
-      }
-      if (typeof event.result === "string") response = event.result;
+        const message = String(event.result ?? "no details");
+        failure = { message, limit: rejected || event.api_error_status === 429 || LIMIT_WORDS.test(message) };
+      } else if (typeof event.result === "string") response = event.result;
     }
   }
-  return { response: response ?? stdout, rateLimit };
+  return { response, rateLimit, failure };
+}
+
+function claudeFailure(failure: ClaudeFailure): Error {
+  return new Error(
+    failure.limit
+      ? PLAN_LIMIT_PREFIX + tidyLimitText(failure.message)
+      : `claude CLI returned an error result: ${failure.message}`
+  );
+}
+
+const LIMIT_WORDS =
+  /usage limit|session limit|rate[ _-]?limit|quota|resource[_ ]exhausted|too many requests|out of credits|limit reached/i;
+
+/** One short line: no links, no "ERROR:" label, at most 200 characters. */
+function tidyLimitText(text: string): string {
+  return text
+    .replace(/\s*\(https?:\/\/[^)]*\)/g, "")
+    .replace(/,?\s*visit https?:\/\/\S+ to purchase more credits/g, "")
+    .replace(/,?\s*visit https?:\/\/\S+/g, "")
+    .replace(/^\W*error\W*/i, "")
+    .replace(/\s+/g, " ")
+    .trim()
+    .slice(0, 200);
+}
+
+/**
+ * Turns a failed CLI call into a readable error. Claude and Antigravity describe failures in
+ * their structured output; for any other CLI only its error output (stderr) is checked for limit
+ * wording, never the answer, which may well talk about rate limits.
+ */
+export async function explainCliFailure(cliType: CliProviderConfig["cliType"], error: unknown): Promise<Error> {
+  if (!(error instanceof CliExitError)) return error instanceof Error ? error : new Error(String(error));
+  if (cliType === "claude") {
+    const stream = readClaudeStream(error.stdout);
+    // A refused call still reports the plan's utilization: the usage ring then shows it full.
+    if (stream.rateLimit) await recordClaudeRateLimit(stream.rateLimit).catch(() => undefined);
+    if (stream.failure) return claudeFailure(stream.failure);
+  }
+  if (cliType === "antigravity") {
+    try {
+      parseAntigravityResult(error.stdout);
+    } catch (described) {
+      if (described instanceof Error && !described.message.includes("produced no result event")) return described;
+    }
+  }
+  // eslint-disable-next-line no-control-regex
+  const lines = error.stderr.replace(/\u001b\[[0-9;]*m/g, "").split(/\r?\n/);
+  const limitLine = lines.find((line) => LIMIT_WORDS.test(line));
+  return limitLine ? new Error(PLAN_LIMIT_PREFIX + tidyLimitText(limitLine)) : error;
+}
+
+/** A CLI that exited with an error, with everything it printed. */
+export class CliExitError extends Error {
+  constructor(
+    readonly code: number | null,
+    readonly signal: NodeJS.Signals | null,
+    readonly stdout: string,
+    readonly stderr: string
+  ) {
+    super(
+      `CLI provider exited with code=${code ?? "null"} signal=${signal ?? "null"} stderr=${stderr.trim() || "empty"} stdout=${stdout.trim() || "empty"}`
+    );
+    this.name = "CliExitError";
+  }
 }
 
 /** Returns true if the CLI tool reads the prompt from stdin, false if it goes in args. */
@@ -447,11 +542,7 @@ async function runCommand(args: {
         return;
       }
 
-      reject(
-        new Error(
-          `CLI provider exited with code=${code ?? "null"} signal=${signal ?? "null"} stderr=${stderr.trim() || "empty"} stdout=${stdout.trim() || "empty"}`
-        )
-      );
+      reject(new CliExitError(code, signal, stdout, stderr));
     });
 
     input.end(args.stdin);

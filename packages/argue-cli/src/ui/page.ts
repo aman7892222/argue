@@ -3,16 +3,16 @@
 // deliberately avoids backticks and dollar-brace so nothing is interpolated by this module.
 // All model-generated text is inserted with textContent, never innerHTML.
 
+import { EFFORT_LABELS } from "../cli-catalog.js";
 import { DESK_THEMES, type DeskTheme } from "../config.js";
 import { SEAT_THEMES } from "./themes.js";
 
 export function renderUiPage(options: { theme?: DeskTheme } = {}): string {
   // Theme data is our own constant; "<" is still escaped so it can never close the script tag.
   const theme = DESK_THEMES.find((t) => t === options.theme) ?? "system";
-  return PAGE.replace("/*SEAT_THEMES*/[]", JSON.stringify(SEAT_THEMES).replace(/</g, "\\u003c")).replace(
-    '/*DESK_THEME*/"system"',
-    JSON.stringify(theme)
-  );
+  return PAGE.replace("/*SEAT_THEMES*/[]", JSON.stringify(SEAT_THEMES).replace(/</g, "\\u003c"))
+    .replace("/*EFFORT_LABELS*/{}", JSON.stringify(EFFORT_LABELS))
+    .replace('/*DESK_THEME*/"system"', JSON.stringify(theme));
 }
 
 const PAGE = String.raw`<!doctype html>
@@ -129,20 +129,39 @@ textarea:focus, select:focus, input[type=text]:focus { outline: none; border-col
 .seat-opt:hover { border-color: var(--line-strong); }
 .seat-main { display: flex; align-items: center; gap: 10px; cursor: pointer; padding-right: 26px; }
 .seat-main input { accent-color: var(--ink); margin: 0; }
-/* Every seat gets the same pair: model, then effort (always shown, "default" until picked). */
+/* Every seat gets the same pair: model, then effort ("Effort" until a level is picked). */
 .seat-pick { display: grid; grid-template-columns: minmax(0, 1.25fr) minmax(0, 1fr); gap: 6px; }
-.seat-pick select.pick { appearance: none; -webkit-appearance: none; height: 30px; padding: 0 26px 0 10px; font-size: 12px; font-weight: 550; border-radius: 8px;
-  color: var(--ink2); background: var(--field2) no-repeat right 9px center / 9px 6px; min-width: 0; text-overflow: ellipsis; cursor: pointer;
+.dd { position: relative; min-width: 0; }
+.dd-btn { display: flex; align-items: center; height: 30px; padding: 0 26px 0 10px; border: 1px solid var(--line); border-radius: 8px; font-size: 12px;
+  font-weight: 550; color: var(--ink2); cursor: pointer; user-select: none; background: var(--field2) no-repeat right 9px center / 9px 6px;
   background-image: url("data:image/svg+xml,%3Csvg xmlns='http://www.w3.org/2000/svg' viewBox='0 0 9 6'%3E%3Cpath d='M.8.8 4.5 4.6 8.2.8' fill='none' stroke='%23948b7f' stroke-width='1.4' stroke-linecap='round' stroke-linejoin='round'/%3E%3C/svg%3E"); }
-.seat-pick select.pick:hover:not(:disabled) { border-color: var(--line-strong); }
-.seat-pick select.pick:disabled { cursor: default; opacity: .6; }
+.dd-btn:hover { border-color: var(--line-strong); }
+.dd-btn:focus-visible, .dd.open .dd-btn { outline: none; border-color: var(--focus); box-shadow: 0 0 0 3px var(--ring); }
+.dd-btn[aria-disabled="true"] { cursor: default; opacity: .55; border-color: var(--line); }
+.dd-btn.ph { color: var(--muted); }
+.dd-text { overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
+/* placed by script next to its button (fixed, so no card or dialog can clip it) */
+.dd-list { position: fixed; z-index: 80; width: max-content; max-width: min(320px, calc(100vw - 16px)); overflow-y: auto; padding: 4px;
+  background: var(--panel); border: 1px solid var(--line); border-radius: 10px; box-shadow: var(--shadow-pop); }
+/* the composer's pill-shaped pickers: "Rounds 3", "Agree Everyone" */
+.dd.dd-pill .dd-btn { height: 32px; gap: 6px; padding: 0 30px 0 13px; border-radius: 999px; background-color: var(--field); background-position: right 12px center;
+  font-size: 13px; }
+.dd-prefix { flex: none; color: var(--muted); font-size: 12.5px; font-weight: 600; }
+.dd.dd-pill .dd-text { color: var(--ink); font-weight: 650; }
+.dd-group { padding: 8px 10px 3px; font-size: 10px; font-weight: 700; letter-spacing: .1em; text-transform: uppercase; color: var(--muted); }
+.dd-opt { position: relative; display: grid; gap: 1px; padding: 6px 10px 6px 27px; border-radius: 7px; cursor: pointer; }
+.dd-opt .t { font-size: 12.5px; font-weight: 600; color: var(--ink); }
+.dd-opt .d { font-size: 11px; line-height: 1.35; color: var(--muted); }
+.dd-opt.active { background: var(--soft); }
+.dd-opt[aria-selected="true"]::before { content: ""; position: absolute; left: 10px; top: 11px; width: 8px; height: 4px; border: solid var(--ink);
+  border-width: 0 0 1.6px 1.6px; transform: rotate(-45deg); }
 .seat-opt .rm { display: none; position: absolute; right: 6px; top: 7px; border: 0; background: var(--panel); color: var(--muted);
   width: 24px; height: 24px; border-radius: 7px; font-size: 15px; line-height: 1; }
 .seat-opt:hover .rm, .seat-opt:focus-within .rm { display: block; }
 .seat-opt .rm:hover { color: var(--disagree); background: var(--disagree-bg); }
 .mark { width: 20px; height: 20px; border-radius: 50%; display: inline-grid; place-items: center; font-size: 11px; font-weight: 700; flex: none; }
 :root[data-theme="dark"] .mark { box-shadow: 0 0 0 1px rgba(255, 255, 255, .08); }
-.link-btn { border: 1px dashed var(--dash); background: transparent; border-radius: 11px; padding: 8px 10px; color: var(--ink2); font-weight: 600; font-size: 13px; text-align: left; }
+.link-btn { display: inline-flex; align-items: center; gap: 6px; border: 1px dashed var(--dash); background: transparent; border-radius: 11px; padding: 8px 10px; color: var(--ink2); font-weight: 600; font-size: 13px; text-align: left; }
 .link-btn:hover { background: var(--field); border-style: solid; }
 .row2 { display: grid; grid-template-columns: 1fr 1fr; gap: 10px; }
 .btn { border: 0; border-radius: 11px; padding: 11px 16px; font-weight: 650; background: var(--ink); color: var(--on-ink); letter-spacing: .01em; transition: transform .1s, opacity .15s; }
@@ -151,7 +170,7 @@ textarea:focus, select:focus, input[type=text]:focus { outline: none; border-col
 .btn:disabled { opacity: .5; cursor: default; }
 .btn.ghost { background: transparent; color: var(--ink); border: 1px solid var(--line); font-weight: 600; padding: 7px 12px; }
 .btn.ghost:hover { background: var(--field); }
-.btn.small { padding: 5px 11px; font-size: 12.5px; }
+.btn.small { display: inline-flex; align-items: center; gap: 6px; padding: 5px 11px; font-size: 12.5px; }
 .btn.danger { background: var(--disagree-bg); color: var(--disagree); }
 .hint { font-size: 12px; color: var(--muted); margin: 0; line-height: 1.5; }
 .err { color: var(--disagree); font-size: 13px; margin: 0; white-space: pre-wrap; }
@@ -165,7 +184,7 @@ textarea:focus, select:focus, input[type=text]:focus { outline: none; border-col
 .attach { display: grid; gap: 6px; }
 .attach-list { display: flex; flex-wrap: wrap; gap: 6px; }
 .attach-list:empty { display: none; }
-.file-chip { display: inline-flex; align-items: center; gap: 6px; max-width: 100%; padding: 3px 4px 3px 9px; border-radius: 999px; background: var(--soft);
+.file-chip { display: inline-flex; align-items: center; gap: 6px; max-width: 100%; padding: 3px 4px 3px 8px; border-radius: 999px; background: var(--soft);
   font-size: 12px; font-weight: 600; color: var(--ink2); }
 .file-chip span { overflow: hidden; text-overflow: ellipsis; white-space: nowrap; max-width: 190px; }
 .file-chip button { border: 0; background: transparent; color: var(--muted); width: 20px; height: 20px; border-radius: 50%; }
@@ -173,14 +192,15 @@ textarea:focus, select:focus, input[type=text]:focus { outline: none; border-col
 .library { padding: 12px 14px; display: grid; gap: 8px; }
 .lib-path { font-family: var(--mono); font-size: 11.5px; color: var(--ink2); word-break: break-all; background: var(--field2); border: 1px solid var(--line); border-radius: 8px; padding: 6px 8px; }
 .lib-actions, .run-actions { display: flex; flex-wrap: wrap; gap: 6px; }
-.run-actions .btn.small { display: inline-flex; align-items: center; gap: 5px; }
-.attached { font-size: 12.5px; color: var(--muted); }
 .side-foot .hint { flex: 1; }
 
 /* pills */
 .pill { display: inline-flex; align-items: center; gap: 5px; font-size: 11.5px; font-weight: 700; padding: 2px 9px; border-radius: 999px; background: var(--soft); color: var(--muted); white-space: nowrap; }
 .pill.consensus, .pill.accept, .pill.agree { background: var(--agree-bg); color: var(--agree); }
 .pill.failed, .pill.reject, .pill.disagree, .pill.eliminated { background: var(--disagree-bg); color: var(--disagree); }
+.pill.limit { background: var(--revise-bg); color: var(--revise); }
+.limit-note { margin: 2px 0 0; font-size: 14px; color: var(--ink2); }
+.drop-error .mono.prose { word-break: break-word; max-height: 260px; overflow: auto; }
 .pill.partial_consensus, .pill.interrupted, .pill.revise, .pill.stale, .pill.stopped, .pill.unresolved { background: var(--revise-bg); color: var(--revise); }
 .pill.in_progress, .pill.running { background: var(--live-bg); color: var(--live); }
 .dot { width: 7px; height: 7px; border-radius: 50%; background: currentColor; flex: none; }
@@ -190,9 +210,6 @@ textarea:focus, select:focus, input[type=text]:focus { outline: none; border-col
 /* main */
 .empty { color: var(--muted); padding: 90px 10px; text-align: center; }
 .empty b { color: var(--ink); display: block; font: 600 26px/1.3 var(--serif); margin-bottom: 8px; }
-.head { display: grid; gap: 12px; margin-bottom: 26px; }
-.head h1 { font: 600 32px/1.22 var(--serif); margin: 0; letter-spacing: -.012em; text-wrap: balance; }
-.head .prompt { color: var(--muted); margin: 0; white-space: pre-wrap; font-size: 15px; }
 .meta { display: flex; flex-wrap: wrap; gap: 8px; align-items: center; font-size: 13px; color: var(--muted); }
 .chip { display: inline-flex; align-items: center; gap: 6px; padding: 3px 10px 3px 3px; border-radius: 999px; background: var(--panel); border: 1px solid var(--line); font-weight: 650; color: var(--ink); font-size: 12.5px; }
 .mono { font-family: var(--mono); font-size: 11.5px; color: var(--muted); }
@@ -322,13 +339,27 @@ details.round > .note:last-child { margin-bottom: 16px; }
 .cli-opt .pick { margin-left: auto; }
 .modal .actions { display: flex; justify-content: flex-end; gap: 8px; margin-top: 16px; }
 .closed-screen { text-align: center; max-width: 420px; padding: 34px 30px; }
+/* the desk's own confirm / ask boxes and short notices */
+.modal.dialog { width: min(420px, 100%); }
+.dialog h2 { font: 600 19px/1.3 var(--serif); margin: 0 0 8px; }
+.dialog-text { margin: 0; color: var(--ink2); font-size: 14px; line-height: 1.55; }
+.dialog input[type=text] { margin-top: 14px; }
+.toasts { position: fixed; left: 50%; bottom: 20px; transform: translateX(-50%); z-index: 90; display: grid; gap: 8px; width: max-content; max-width: calc(100vw - 32px); }
+.toast { display: flex; align-items: center; gap: 10px; padding: 9px 8px 9px 14px; border: 1px solid var(--line); border-radius: 12px; background: var(--panel);
+  color: var(--ink); box-shadow: var(--shadow-pop); font-size: 13.5px; }
+.toast.error { border-left: 3px solid var(--disagree); }
+.toast-x { border: 0; background: transparent; color: var(--muted); width: 24px; height: 24px; border-radius: 7px; font-size: 15px; line-height: 1; flex: none; }
+.toast-x:hover { background: var(--soft); color: var(--ink); }
+/* line icons */
+.ico { width: 15px; height: 15px; flex: none; fill: none; stroke: currentColor; stroke-width: 1.8; stroke-linecap: round; stroke-linejoin: round; }
+.file-chip .ico { width: 14px; height: 14px; color: var(--muted); }
+::placeholder { color: var(--placeholder); opacity: 1; }
 .closed-screen b { display: block; font: 600 24px/1.3 var(--serif); margin-bottom: 8px; }
 
 @media (max-width: 920px) {
   .app { grid-template-columns: 1fr; }
   aside { position: static; height: auto; border-right: 0; border-bottom: 1px solid var(--line); }
   main { padding: 24px 16px 70px; }
-  .head h1 { font-size: 26px; }
 }
 @media (max-width: 680px) { .lanes { grid-template-columns: 1fr !important; } }
 
@@ -395,10 +426,6 @@ main { max-width: none; padding: 0 40px 90px; display: flex; flex-direction: col
 .tool-btn { display: inline-flex; align-items: center; gap: 6px; border: 1px solid var(--line); background: var(--field); color: var(--ink2); border-radius: 999px;
   padding: 6px 12px; font-size: 13px; font-weight: 600; }
 .tool-btn:hover { border-color: var(--line-strong); }
-.tool-select { display: inline-flex; align-items: center; gap: 6px; border: 1px solid var(--line); background: var(--field); border-radius: 999px; padding: 2px 4px 2px 12px;
-  font-size: 12.5px; color: var(--muted); font-weight: 600; }
-.tool-select select { border: 0; padding: 4px 4px; background: transparent; font-size: 13px; font-weight: 650; color: var(--ink); width: auto; }
-.tool-select select:focus { box-shadow: none; }
 .spacer { flex: 1; }
 .kbd-hint { font-size: 11.5px; color: var(--muted); font-family: var(--mono); }
 .btn.start { border-radius: 999px; padding: 9px 18px; }
@@ -417,7 +444,12 @@ main { max-width: none; padding: 0 40px 90px; display: flex; flex-direction: col
 .question { display: flex; justify-content: flex-end; margin: 4px 0 18px; }
 .question .bubble { max-width: 78%; background: var(--bubble); color: var(--ink); border-radius: 20px 20px 6px 20px; padding: 12px 16px; font-size: 15px; line-height: 1.55; white-space: pre-wrap; }
 .question .bubble small { display: block; color: var(--muted); font-size: 11px; text-transform: uppercase; letter-spacing: .1em; font-weight: 700; margin-bottom: 4px; }
-.run-view .head { margin-bottom: 22px; }
+/* one line under the question: status, seats and time, then the actions */
+.run-bar { display: flex; flex-wrap: wrap; align-items: center; justify-content: space-between; gap: 10px 14px; margin: 0 0 26px; }
+.run-bar .meta { flex: 1 1 auto; min-width: 0; }
+.question .bubble .asked { white-space: pre-wrap; }
+.bubble-files { display: flex; flex-wrap: wrap; gap: 6px; margin-top: 10px; white-space: normal; }
+.bubble .file-chip { background: var(--panel); padding-right: 10px; }
 
 @media (max-width: 920px) {
   .app { grid-template-columns: 1fr; }
@@ -485,18 +517,8 @@ main { max-width: none; padding: 0 40px 90px; display: flex; flex-direction: col
             <svg viewBox="0 0 24 24" width="17" height="17" aria-hidden="true"><path d="M21 11.5 12.6 19.9a5.5 5.5 0 0 1-7.8-7.8l8.5-8.5a3.7 3.7 0 0 1 5.2 5.2l-8.5 8.5a1.8 1.8 0 0 1-2.6-2.6l7.8-7.8" fill="none" stroke="currentColor" stroke-width="1.7" stroke-linecap="round" stroke-linejoin="round"/></svg>
             <span>Attach</span>
           </button>
-          <label class="tool-select" title="How many rounds of cross-examination, at most">
-            <span>Rounds</span>
-            <select id="rounds"><option>1</option><option>2</option><option selected>3</option><option>4</option><option>5</option></select>
-          </label>
-          <label class="tool-select" title="How many seats must accept a claim for it to count as agreed">
-            <span>Agree</span>
-            <select id="threshold">
-              <option value="1">Everyone</option>
-              <option value="0.67">Two-thirds</option>
-              <option value="0.51">Majority</option>
-            </select>
-          </label>
+          <span id="rounds-pick"></span>
+          <span id="agree-pick"></span>
           <span class="spacer"></span>
           <span class="kbd-hint" id="kbd-hint"></span>
           <button class="btn start" id="start" type="button">Start debate</button>
@@ -507,7 +529,7 @@ main { max-width: none; padding: 0 40px 90px; display: flex; flex-direction: col
       <div class="seats-panel">
         <div class="seats-head">
           <span class="eyebrow">Seats at the table</span>
-          <button class="link-btn small" id="add-seat" type="button">⟳ Scan for CLIs</button>
+          <button class="link-btn small" id="add-seat" type="button"><svg viewBox="0 0 24 24" class="ico" aria-hidden="true"><path d="M20 12a8 8 0 1 1-2.34-5.66"/><path d="M20 4v5h-5"/></svg>Scan for CLIs</button>
         </div>
         <div class="seats" id="seats"></div>
       </div>
@@ -529,6 +551,7 @@ main { max-width: none; padding: 0 40px 90px; display: flex; flex-direction: col
   var PALETTE = ["#3d5bd9", "#0c8599", "#2f7d4a", "#ae3ec9", "#c2255c", "#e8590c"];
   // Shared seat themes (src/ui/themes.ts), injected by the server: same marks as reports and icons.
   var SEAT_THEMES = /*SEAT_THEMES*/[];
+  var EFFORT_LABELS = /*EFFORT_LABELS*/{};
   function themeForSeat(model, cli) {
     var m = String(model || "").toLowerCase();
     for (var i = 0; m && i < SEAT_THEMES.length; i++) {
@@ -585,16 +608,91 @@ main { max-width: none; padding: 0 40px 90px; display: flex; flex-direction: col
     return el;
   }
 
+  // ---------- line icons: drawn in the text colour, so they match both themes (no emoji) ----------
+  var ICONS = {
+    file: ["M14 3H7a2 2 0 0 0-2 2v14a2 2 0 0 0 2 2h10a2 2 0 0 0 2-2V8z", "M14 3v5h5"],
+    text: ["M14 3H7a2 2 0 0 0-2 2v14a2 2 0 0 0 2 2h10a2 2 0 0 0 2-2V8z", "M14 3v5h5", "M9 13h6", "M9 17h4"],
+    image: ["M5 4h14a2 2 0 0 1 2 2v12a2 2 0 0 1-2 2H5a2 2 0 0 1-2-2V6a2 2 0 0 1 2-2z", "m21 15-5-5L5 20", "M9 9h.01"],
+    globe: ["M12 3a9 9 0 1 0 0 18a9 9 0 1 0 0-18z", "M3 12h18", "M12 3c2.5 2.6 3.8 5.6 3.8 9s-1.3 6.4-3.8 9", "M12 3c-2.5 2.6-3.8 5.6-3.8 9s1.3 6.4 3.8 9"],
+    folder: ["M3 7.5A2.5 2.5 0 0 1 5.5 5H9l2 2.5h7.5A2.5 2.5 0 0 1 21 10v7.5a2.5 2.5 0 0 1-2.5 2.5h-13A2.5 2.5 0 0 1 3 17.5z"],
+    save: ["M7 4h10a1 1 0 0 1 1 1v15l-6-4-6 4V5a1 1 0 0 1 1-1z"],
+    again: ["M20 12a8 8 0 1 1-2.34-5.66", "M20 4v5h-5"],
+    stop: ["M8 7h8a1 1 0 0 1 1 1v8a1 1 0 0 1-1 1H8a1 1 0 0 1-1-1V8a1 1 0 0 1 1-1z"]
+  };
+  function icon(name) {
+    var el = svg("svg", { viewBox: "0 0 24 24", class: "ico", "aria-hidden": "true" });
+    ICONS[name].forEach(function (d) { el.appendChild(svg("path", { d: d })); });
+    return el;
+  }
+  function fileKind(name) { return /\.pdf$/i.test(name) ? "file" : /\.(png|jpe?g|webp|gif)$/i.test(name) ? "image" : "text"; }
+
+  // ---------- in-page dialogs and notices (the browser's own boxes ignore the desk's look) ----------
+  // Resolves true/false, or the typed text (null when cancelled) when o.input is given.
+  var dialogCount = 0;
+  function ask(o) {
+    return new Promise(function (resolve) {
+      var id = "dlg" + (++dialogCount);
+      var input = o.input ? h("input", { type: "text", value: o.input.value || "", placeholder: o.input.placeholder || "", "aria-label": o.title }) : null;
+      var ok = h("button", { class: "btn" + (o.danger ? " danger" : ""), type: "button" }, o.confirm || "OK");
+      var cancel = h("button", { class: "btn ghost", type: "button" }, o.cancel || "Cancel");
+      var box = h("div", { class: "card modal dialog", role: "alertdialog", "aria-modal": "true", "aria-labelledby": id + "-t", "aria-describedby": o.message ? id + "-m" : null },
+        h("h2", { id: id + "-t", text: o.title }),
+        o.message ? h("p", { id: id + "-m", class: "dialog-text", text: o.message }) : null,
+        input,
+        h("div", { class: "actions" }, cancel, ok));
+      var scrim = h("div", { class: "scrim" }, box);
+      var before = document.activeElement;
+      function done(value) {
+        document.removeEventListener("keydown", onKey, true);
+        scrim.remove();
+        if (before && before.focus && document.contains(before)) before.focus();
+        resolve(value);
+      }
+      var no = function () { done(input ? null : false); };
+      var yes = function () { done(input ? input.value.trim() : true); };
+      // Captured first, so Escape or Enter here never reaches a dialog underneath.
+      function onKey(ev) {
+        if (ev.key === "Escape") { ev.preventDefault(); ev.stopPropagation(); no(); }
+        else if (ev.key === "Enter" && ev.target === input) { ev.preventDefault(); ev.stopPropagation(); yes(); }
+        else if (ev.key === "Tab") {
+          var stops = [input, cancel, ok].filter(Boolean);
+          var at = stops.indexOf(document.activeElement);
+          ev.preventDefault();
+          stops[(at + (ev.shiftKey ? stops.length - 1 : 1)) % stops.length].focus();
+        }
+      }
+      ok.addEventListener("click", yes);
+      cancel.addEventListener("click", no);
+      scrim.addEventListener("mousedown", function (ev) { if (ev.target === scrim) no(); });
+      document.addEventListener("keydown", onKey, true);
+      document.body.appendChild(scrim);
+      // Risky actions start on Cancel, so a stray Enter never confirms them.
+      (input || (o.danger ? cancel : ok)).focus();
+    });
+  }
+  // A short note at the bottom of the window that goes away by itself.
+  function notify(message, kind) {
+    var box = document.getElementById("toasts");
+    if (!box) { box = h("div", { id: "toasts", class: "toasts", role: "status", "aria-live": "polite" }); document.body.appendChild(box); }
+    var note = h("div", { class: "toast" + (kind ? " " + kind : "") }, h("span", { text: message }),
+      h("button", { type: "button", class: "toast-x", "aria-label": "Dismiss", onclick: function () { note.remove(); } }, "×"));
+    box.appendChild(note);
+    setTimeout(function () { note.remove(); }, 8000);
+  }
+
   // ---------- seat themes ----------
   function agentInfo(id) {
     return state.config ? state.config.agents.filter(function (a) { return a.id === id; })[0] : null;
   }
   // A seat's catalog key: its cliType, or for "text" seats the command it runs (e.g. "ollama").
   function seatKey(a) { return a.cliType === "text" ? (a.command || "text") : a.cliType; }
-  function themeFor(id) {
+  // Seat cards follow the model picked now; a debate shows the model each seat ran with.
+  function themeFor(id, seatCard) {
     var a = agentInfo(id);
-    var picked = state.pickers && state.pickers[id] ? state.pickers[id].value().model : null;
-    var t = a ? themeForSeat(picked || a.model, seatKey(a)) : null;
+    var used = !seatCard && state.runSeats && state.runSeats[id];
+    var picked = seatCard && state.pickers && state.pickers[id] ? state.pickers[id].value().model : null;
+    var model = used ? used.model : picked || (a && a.model);
+    var t = model || a ? themeForSeat(model, used ? used.cli : a && seatKey(a)) : null;
     if (t) return paint(t);
     var ids = state.config ? state.config.agents.map(function (x) { return x.id; }) : [];
     var idx = Math.max(0, ids.indexOf(id));
@@ -641,14 +739,65 @@ main { max-width: none; padding: 0 40px 90px; display: flex; flex-direction: col
     return h("span", { class: "mark", style: style, text: t.glyph });
   }
   function mark(id) { return markTheme(themeFor(id)); }
-  function agentModel(id) {
+  function seatMark(id) { return markTheme(themeFor(id, true)); }
+  // "Opus 5.5 · High": the model and effort a seat used in the open debate (its settings when unknown).
+  function seatUsedText(id) {
+    var used = state.runSeats && state.runSeats[id];
     var a = agentInfo(id);
-    return a ? a.provider + " · " + a.model : "";
+    var key = used ? used.cli : a && seatKey(a);
+    var model = used ? used.model : a && a.model;
+    if (!model) return "";
+    var label = infoFor(key, canonical(key, model)).label || model;
+    return label + (used && used.effort ? " · " + effortLabel(used.effort) : "");
   }
 
   var STATUS_LABEL = { consensus: "Consensus", partial_consensus: "Partial consensus", unresolved: "Unresolved", interrupted: "Interrupted",
     failed: "Failed", in_progress: "Running", running: "Running", stale: "No activity", stopped: "Stopped" };
   function statusPill(status) { return h("span", { class: "pill " + status }, h("span", { class: "dot" }), STATUS_LABEL[status] || status); }
+  // Why a seat dropped out. "plan_limit: …" errors are its plan running out, in the CLI's own
+  // words ("You've hit your session limit · resets 6:40pm").
+  var PLAN_LIMIT = "plan_limit: ";
+  function dropReason(reason, error) {
+    var text = String(error || "").trim().replace(/^Error: /, "");
+    if (text.indexOf(PLAN_LIMIT) === 0) return { limit: true, label: "plan limit reached", text: text.slice(PLAN_LIMIT.length) };
+    var refused = claudeRefusal(text);
+    if (refused) return { limit: true, label: "plan limit reached", text: refused };
+    if (reason === "timeout" || /^__(round_)?timeout__$/.test(text)) return { limit: false, label: "did not answer in time", text: "" };
+    return { limit: false, label: "dropped: error", text: text, summary: schemaComplaint(text) };
+  }
+  // Debates from before this version kept Claude's raw output: its own refusal is in there.
+  function claudeRefusal(text) {
+    if (text.indexOf('"is_error":true') < 0) return null;
+    var lines = text.split(/\r?\n/);
+    for (var i = lines.length - 1; i >= 0; i--) {
+      var line = lines[i].replace(/^[^{]*stdout=(?=\{)/, "");
+      if (line.charAt(0) !== "{" || line.indexOf('"is_error":true') < 0) continue;
+      var event;
+      try { event = JSON.parse(line); } catch (e) { continue; }
+      if (event.type === "result" && (event.api_error_status === 429 || /limit|quota/i.test(String(event.result)))) return String(event.result);
+    }
+    return null;
+  }
+  // A schema complaint ([{ path, message }, ...]) as one readable sentence.
+  function schemaComplaint(text) {
+    if (text.charAt(0) !== "[") return null;
+    var issues;
+    try { issues = JSON.parse(text); } catch (e) { return null; }
+    if (!Array.isArray(issues) || !issues.length || !issues[0] || !Array.isArray(issues[0].path)) return null;
+    return "Its answer did not fit the expected format (" + issues[0].path.join(".") + ": " + issues[0].message +
+      (issues.length > 1 ? ", and " + (issues.length - 1) + " more" : "") + ").";
+  }
+  // A plan limit reads as a sentence; any other error shows a one-line summary, the rest on request.
+  function dropDetails(drop) {
+    if (drop.limit) return h("p", { class: "limit-note", text: drop.text || "This seat's plan or quota ran out." });
+    if (!drop.text) return h("p", { class: "limit-note", text: drop.label === "did not answer in time" ? "This seat did not answer in time." : "No details." });
+    var first = drop.summary || drop.text.split(/\r?\n/)[0];
+    var box = h("div", { class: "drop-error" }, h("p", { class: "limit-note", text: first.length > 180 ? first.slice(0, 180) + "…" : first }));
+    if (first.length > 180 || drop.text.length > first.length) {
+      box.appendChild(h("details", { class: "more" }, h("summary", { text: "Full error" }), h("p", { class: "mono prose", text: drop.text })));
+    }
+    return box;
+  }
   function fmtElapsed(ms) {
     if (typeof ms !== "number") return "";
     var s = Math.round(ms / 1000);
@@ -658,10 +807,6 @@ main { max-width: none; padding: 0 40px 90px; display: flex; flex-direction: col
     var m = /^argue_(\d+)/.exec(requestId);
     return m ? new Date(Number(m[1])).toLocaleString([], { month: "short", day: "numeric", hour: "numeric", minute: "2-digit" }) : requestId;
   }
-
-  // ---------- config + seats ----------
-  function storeGet(key) { try { return JSON.parse(localStorage.getItem(key) || "null"); } catch (e) { return null; } }
-  function storeSet(key, v) { try { localStorage.setItem(key, JSON.stringify(v)); } catch (e) { /* private mode: not remembered */ } }
 
   // ---------- theme: Light, Dark, or Default (follow this computer's setting) ----------
   var darkQuery = window.matchMedia ? matchMedia("(prefers-color-scheme: dark)") : null;
@@ -697,36 +842,62 @@ main { max-width: none; padding: 0 40px 90px; display: flex; flex-direction: col
     if (darkQuery.addEventListener) darkQuery.addEventListener("change", onSystemTheme); else darkQuery.addListener(onSystemTheme);
   }
 
-  // Asks each installed CLI for its model catalog (agy models, codex debug models): no prompts, no tokens.
-  function scanClis() {
-    if (state.scanning) return state.scanning;
-    state.scanning = api("/api/clis?list=1").then(function (data) {
-      state.clis = {};
-      data.clis.forEach(function (c) { state.clis[c.id] = c; });
-      state.clisList = data.clis;
-      renderSeats();
+  // ---------- CLI catalog: each seat's models, their names and effort levels ----------
+  // Two passes, neither sends a prompt or spends tokens: a quick one (what is installed, the
+  // built-in model lists) so the pickers show real names at once, then one that asks each CLI
+  // for its own list (agy models, codex debug models).
+  function scanClis(list, fresh) {
+    var key = list ? "scanning" : "peeking";
+    if (state[key]) return state[key];
+    var p = api("/api/clis" + (list ? "?list=1" + (fresh ? "&fresh=1" : "") : "")).then(function (data) {
+      // A quick pass that finishes after the full one must not replace it.
+      if (list || !state.clisListed) {
+        state.clis = {};
+        data.clis.forEach(function (c) { state.clis[c.id] = c; });
+        state.clisList = data.clis;
+        if (list) state.clisListed = true;
+        renderSeats();
+      }
       return data;
     });
-    state.scanning.then(function () { state.scanning = null; }, function () { state.scanning = null; });
-    return state.scanning;
+    state[key] = p;
+    p.then(function () { state[key] = null; }, function () { state[key] = null; });
+    return p;
   }
+  function cliFor(key) { return (state.clis && state.clis[key]) || null; }
+  // Aliases are shown as the model they stand for today (opus is Opus 5.5).
+  function canonical(key, model) {
+    var cli = cliFor(key);
+    return (cli && cli.modelAliases && cli.modelAliases[model]) || model;
+  }
+  function infoFor(key, model) {
+    var cli = cliFor(key);
+    return (cli && cli.modelInfo && cli.modelInfo[model]) || {};
+  }
+  // The CLI's own list, in its order, with the seat's model added when the list lacks it.
   function modelOptionsFor(a) {
-    var cli = state.clis && state.clis[seatKey(a)];
-    var models = [a.model].concat(cli ? cli.models : []);
-    return models.filter(function (m, i) { return m && models.indexOf(m) === i; });
+    var cli = cliFor(seatKey(a));
+    var own = canonical(seatKey(a), a.model);
+    var models = cli ? cli.models.slice() : [];
+    if (models.indexOf(own) < 0) models.unshift(own);
+    return models;
   }
+  // A model the catalog lists with no levels (Haiku 4.5) has no effort setting.
   function effortOptionsFor(a, model) {
     if (a.effortInModel) return Object.keys(variantsFor(a).groups[model] || {}).filter(Boolean).sort(byEffort);
-    var cli = state.clis && state.clis[seatKey(a)];
+    var cli = cliFor(seatKey(a));
     if (!cli) return [];
-    var byModel = cli.effortsByModel && cli.effortsByModel[model];
-    return byModel && byModel.length ? byModel : (cli.efforts || []);
+    var byModel = cli.effortsByModel || {};
+    return Object.prototype.hasOwnProperty.call(byModel, model) ? byModel[model] : (cli.efforts || []);
   }
   // Antigravity puts the effort in the model id (gemini-4-argon-high). The desk shows those as a
   // model (gemini-4-argon) plus an effort (high), the same pair every other seat has.
   var EFFORT_SUFFIX = /^(.+)-(minimal|low|medium|high|xhigh|max)$/;
   var EFFORT_RANK = ["minimal", "low", "medium", "high", "xhigh", "max", "ultra"];
+  var EFFORT_DETAIL = { minimal: "Fastest, least thinking", low: "Quick, light thinking", medium: "Balanced speed and depth",
+    high: "Thinks harder", xhigh: "Thinks much harder", max: "Most thorough, slowest", ultra: "Beyond max" };
   function byEffort(x, y) { return EFFORT_RANK.indexOf(x) - EFFORT_RANK.indexOf(y); }
+  function effortLabel(e) { return EFFORT_LABELS[e] || (e ? e.charAt(0).toUpperCase() + e.slice(1) : ""); }
   function splitModel(m) { var s = EFFORT_SUFFIX.exec(m); return s ? { base: s[1], effort: s[2] } : { base: m, effort: "" }; }
   // { order: [base…], groups: { base: { effort: modelId } } }; "" holds a model id with no effort suffix.
   function variantsFor(a) {
@@ -739,32 +910,222 @@ main { max-width: none; padding: 0 40px 90px; display: flex; flex-direction: col
     return out;
   }
   // The model id to run. "Default" effort keeps the seat's own model when it is this one,
-  // otherwise the middle tier the CLI lists.
+  // otherwise the middle level the CLI lists.
   function resolveVariant(a, base, effort) {
     var g = variantsFor(a).groups[base] || {};
     if (effort && g[effort]) return g[effort];
     if (splitModel(a.model).base === base) return a.model;
     return g[""] || g.medium || g[Object.keys(g).sort(byEffort)[0]] || base;
   }
+  function modelItems(a) {
+    var key = seatKey(a);
+    if (a.effortInModel) {
+      var v = variantsFor(a);
+      return v.order.map(function (base) {
+        var name = infoFor(key, v.groups[base][Object.keys(v.groups[base])[0]]).label;
+        // "Gemini 4 Argon (High)" names one variant; the model picker names the model.
+        return { value: base, text: name ? name.replace(/\s*\((minimal|low|medium|high|extra high|xhigh|max)\)\s*$/i, "") : base };
+      });
+    }
+    return modelOptionsFor(a).map(function (m) {
+      var info = infoFor(key, m);
+      return { value: m, text: info.label || m, detail: info.detail, group: info.group };
+    });
+  }
+  function defaultEffortText(a, model) {
+    if (a.effortInModel) {
+      var used = resolveVariant(a, model, "");
+      var level = effortLabel(splitModel(used).effort);
+      return used === a.model ? "This seat's setting" + (level ? ": " + level : "") : level || "The model's own level";
+    }
+    var cli = cliFor(seatKey(a));
+    return "Use " + (cli ? cli.label : "the CLI") + "'s own setting";
+  }
+  // "Default" first (shown as "Effort" on the button), then only the levels this model accepts.
+  function effortItems(a, model) {
+    var levels = effortOptionsFor(a, model);
+    if (!levels.length) return [];
+    var details = a.effortInModel ? {} : infoFor(seatKey(a), model).effortDetails || {};
+    return [{ value: "", text: "Default", detail: defaultEffortText(a, model) }].concat(levels.map(function (e) {
+      return { value: e, text: effortLabel(e), detail: details[e] || EFFORT_DETAIL[e] };
+    }));
+  }
+  // The model and effort last picked for a seat (kept in the workspace config by the server).
+  function savedPick(a) {
+    var p = (state.config.picks || {})[a.id] || {};
+    var model = p.model ? canonical(seatKey(a), p.model) : "";
+    var effort = p.effort || "";
+    if (a.effortInModel && model) { var s = splitModel(model); model = s.base; effort = effort || s.effort; }
+    return { model: model, effort: effort };
+  }
+
+  // ---------- dropdown: one look for every list on the desk, in both themes ----------
+  // A select-only combobox (WAI-ARIA pattern): focus stays on it, the arrow keys move through
+  // the list, Enter, Space or a click picks, and Escape, Tab or a click elsewhere closes it.
+  // Options: label, items [{ value, text, detail, group }], value, placeholder (shown while the
+  // value is ""), prefix (a fixed word inside the button, as in "Rounds 3"), pill, onChange.
+  var openDropdown = null, dropdownCount = 0;
+  function dropdown(o) {
+    var id = "dd" + (++dropdownCount), items = [], value = "", active = -1;
+    var text = h("span", { class: "dd-text" });
+    var btn = h("div", { class: "dd-btn", role: "combobox", tabindex: "0", "aria-haspopup": "listbox", "aria-expanded": "false",
+      "aria-controls": id + "-list", "aria-label": o.label }, o.prefix ? h("span", { class: "dd-prefix", text: o.prefix }) : null, text);
+    var list = h("div", { class: "dd-list", role: "listbox", id: id + "-list", "aria-label": o.label, hidden: true });
+    var self = { el: h("div", { class: "dd" + (o.pill ? " dd-pill" : "") }, btn, list), value: function () { return value; },
+      setItems: setItems, setValue: function (v) { setItems(items, v); }, close: close, setTitle: function (t) { btn.title = t; } };
+    // Clicks inside the list never take focus away from the button.
+    list.addEventListener("mousedown", function (ev) { ev.preventDefault(); });
+
+    function options() { return list.querySelectorAll(".dd-opt"); }
+    function selected() { for (var i = 0; i < items.length; i++) if (items[i].value === value) return i; return -1; }
+    function setItems(next, want) {
+      items = next || [];
+      value = items.some(function (it) { return it.value === want; }) ? want : o.placeholder || !items.length ? "" : items[0].value;
+      list.textContent = "";
+      var group = null;
+      items.forEach(function (it, i) {
+        if (it.group && it.group !== group) list.appendChild(h("div", { class: "dd-group", role: "presentation", text: it.group }));
+        group = it.group || null;
+        var opt = h("div", { class: "dd-opt", role: "option", id: id + "-o" + i },
+          h("span", { class: "t", text: it.text }), it.detail ? h("span", { class: "d", text: it.detail }) : null);
+        opt.addEventListener("click", function () { choose(i); });
+        opt.addEventListener("mousemove", function () { if (active !== i) setActive(i); });
+        list.appendChild(opt);
+      });
+      var off = !items.length;
+      btn.setAttribute("aria-disabled", String(off));
+      btn.tabIndex = off ? -1 : 0;
+      if (off) close();
+      sync();
+    }
+    function sync() {
+      var i = selected();
+      var placeholder = !!o.placeholder && value === "";
+      text.textContent = placeholder ? o.placeholder : i >= 0 ? items[i].text : "";
+      btn.classList.toggle("ph", placeholder);
+      [].forEach.call(options(), function (el, k) { el.setAttribute("aria-selected", String(k === i)); });
+    }
+    function setActive(i) {
+      var els = options();
+      if (els[active]) els[active].classList.remove("active");
+      active = i;
+      var el = els[i];
+      if (!el) { btn.removeAttribute("aria-activedescendant"); return; }
+      el.classList.add("active");
+      btn.setAttribute("aria-activedescendant", el.id);
+      if (el.offsetTop < list.scrollTop) list.scrollTop = el.offsetTop - 4;
+      else if (el.offsetTop + el.offsetHeight > list.scrollTop + list.clientHeight) list.scrollTop = el.offsetTop + el.offsetHeight - list.clientHeight + 4;
+    }
+    // The list floats above the page, so no card or dialog can cut it off: below the button, or
+    // above it when there is more room there, and always inside the window.
+    function place() {
+      var b = btn.getBoundingClientRect();
+      list.style.minWidth = b.width + "px";
+      list.style.maxHeight = "";
+      list.style.left = "0px";
+      list.style.top = "0px";
+      var natural = list.getBoundingClientRect();
+      var below = window.innerHeight - b.bottom - 12, above = b.top - 12;
+      var down = below >= Math.min(natural.height, 240) || below >= above;
+      var room = Math.max(120, Math.min(320, down ? below : above));
+      list.style.maxHeight = room + "px";
+      list.style.top = (down ? b.bottom + 4 : b.top - 4 - Math.min(natural.height, room)) + "px";
+      var left = b.left + natural.width > window.innerWidth - 8 ? b.right - natural.width : b.left;
+      list.style.left = Math.max(8, left) + "px";
+    }
+    function open() {
+      if (!items.length || openDropdown === self) return;
+      if (openDropdown) openDropdown.close();
+      openDropdown = self;
+      list.hidden = false;
+      self.el.classList.add("open");
+      btn.setAttribute("aria-expanded", "true");
+      place();
+      setActive(Math.max(0, selected()));
+      document.addEventListener("mousedown", onOutside, true);
+      window.addEventListener("scroll", onScroll, true);
+      window.addEventListener("resize", close);
+    }
+    // Focus leaving closes the list; so does a click anywhere else (even where focus cannot go),
+    // scrolling the page under it, or resizing the window.
+    function onOutside(ev) { if (!self.el.contains(ev.target)) close(); }
+    function onScroll(ev) { if (ev.target !== list) close(); }
+    function close() {
+      if (openDropdown !== self) return;
+      document.removeEventListener("mousedown", onOutside, true);
+      window.removeEventListener("scroll", onScroll, true);
+      window.removeEventListener("resize", close);
+      openDropdown = null;
+      list.hidden = true;
+      self.el.classList.remove("open");
+      btn.setAttribute("aria-expanded", "false");
+      setActive(-1);
+      // A catalog scan that finished while this was open redraws the seats now.
+      if (state.seatsStale) setTimeout(renderSeats, 0);
+    }
+    function choose(i) {
+      var it = items[i];
+      if (!it) return;
+      var changed = it.value !== value;
+      value = it.value;
+      sync();
+      close();
+      if (changed && o.onChange) o.onChange(value);
+    }
+    btn.addEventListener("click", function () { if (openDropdown === self) close(); else open(); });
+    btn.addEventListener("blur", close);
+    btn.addEventListener("keydown", function (ev) {
+      var k = ev.key;
+      if (openDropdown !== self) {
+        if (k === "ArrowDown" || k === "ArrowUp" || k === "Enter" || k === " ") { ev.preventDefault(); open(); }
+        return;
+      }
+      if (k === "ArrowDown" || k === "ArrowUp") { ev.preventDefault(); setActive(Math.min(items.length - 1, Math.max(0, active + (k === "ArrowDown" ? 1 : -1)))); }
+      else if (k === "Home" || k === "End") { ev.preventDefault(); setActive(k === "Home" ? 0 : items.length - 1); }
+      else if (k === "Enter" || k === " ") { ev.preventDefault(); choose(active); }
+      else if (k === "Escape") { ev.preventDefault(); ev.stopPropagation(); close(); }
+      else if (k === "Tab") close();
+    });
+    setItems(o.items, o.value);
+    return self;
+  }
+
+  // The composer's Rounds and Agree pickers: the same dropdown as the seats, so every list on
+  // the desk follows the theme.
+  var roundsDd = dropdown({ label: "Rounds", prefix: "Rounds", pill: true, value: "3",
+    items: [1, 2, 3, 4, 5].map(function (n) { return { value: String(n), text: String(n) }; }),
+    onChange: function () { state.roundsTouched = true; } });
+  roundsDd.setTitle("How many rounds of cross-examination, at most");
+  var agreeDd = dropdown({ label: "Agree", prefix: "Agree", pill: true, value: "1",
+    items: [
+      { value: "1", text: "Everyone", detail: "Every seat must accept a claim" },
+      { value: "0.67", text: "Two-thirds", detail: "At least two thirds of the seats" },
+      { value: "0.51", text: "Majority", detail: "More than half of the seats" }
+    ],
+    onChange: function () { state.thresholdTouched = true; } });
+  agreeDd.setTitle("How many seats must accept a claim for it to count as agreed");
+  document.getElementById("rounds-pick").replaceWith(roundsDd.el);
+  document.getElementById("agree-pick").replaceWith(agreeDd.el);
 
   function loadConfig() {
     return api("/api/config").then(function (cfg) {
       state.config = cfg;
       renderSeats();
-      var rounds = document.getElementById("rounds");
-      if (cfg.defaults.maxRounds >= 1 && cfg.defaults.maxRounds <= 5 && !state.roundsTouched) rounds.value = String(cfg.defaults.maxRounds);
-      var th = document.getElementById("threshold");
-      var match = [].slice.call(th.options).filter(function (o) { return Number(o.value) === cfg.defaults.threshold; })[0];
-      if (match && !state.thresholdTouched) th.value = match.value;
+      if (cfg.defaults.maxRounds >= 1 && cfg.defaults.maxRounds <= 5 && !state.roundsTouched) roundsDd.setValue(String(cfg.defaults.maxRounds));
+      var agree = ["1", "0.67", "0.51"].filter(function (v) { return Number(v) === cfg.defaults.threshold; })[0];
+      if (agree && !state.thresholdTouched) agreeDd.setValue(agree);
     }).catch(function (e) { showFormError("Could not load config: " + e.message); });
   }
 
-  // One row per seat: tick it to take part, and pick its model and effort for this debate.
+  // One card per seat: tick it to take part, and pick its model and effort for this debate.
   function renderSeats() {
     var cfg = state.config; if (!cfg) return;
-    var prevChecked = {};
-    [].forEach.call(document.querySelectorAll("#seats input[type=checkbox]"), function (c) { prevChecked[c.value] = c.checked; });
     var box = document.getElementById("seats");
+    // Never pull a list out from under the pointer: redraw once the open one closes.
+    if (openDropdown && box.contains(openDropdown.el)) { state.seatsStale = true; return; }
+    state.seatsStale = false;
+    var prevChecked = {};
+    [].forEach.call(box.querySelectorAll("input[type=checkbox]"), function (c) { prevChecked[c.value] = c.checked; });
     box.textContent = "";
     state.pickers = {};
     if (!cfg.agents.length) {
@@ -772,64 +1133,63 @@ main { max-width: none; padding: 0 40px 90px; display: flex; flex-direction: col
       return;
     }
     cfg.agents.forEach(function (a) {
-      var saved = storeGet("argue.seat." + a.id) || {};
-      var cli = state.clis && state.clis[seatKey(a)];
+      var key = seatKey(a);
+      var own = a.effortInModel ? splitModel(a.model).base : canonical(key, a.model);
+      var pick = savedPick(a);
       var cb = h("input", { type: "checkbox", value: a.id });
       cb.checked = a.id in prevChecked ? prevChecked[a.id] : cfg.defaults.agents.indexOf(a.id) >= 0;
-      // A model picked earlier as a full id (gemini-4-argon-high) comes back as model + effort.
-      if (a.effortInModel && saved.model) {
-        var savedSplit = splitModel(saved.model);
-        saved = { model: savedSplit.base, effort: saved.effort || savedSplit.effort };
+      var models = modelItems(a);
+      var startModel = models.some(function (m) { return m.value === pick.model; }) ? pick.model : own;
+      var modelDd = dropdown({ label: "Model for " + a.id, items: models, value: startModel, onChange: changed });
+      var effortDd = dropdown({ label: "Effort for " + a.id, placeholder: "Effort", onChange: changed });
+      // Fills the effort list for the chosen model, keeping the wanted level when that model has it.
+      function refresh(wantEffort) {
+        var model = modelDd.value();
+        var items = effortItems(a, model);
+        effortDd.setItems(items, wantEffort);
+        var info = infoFor(key, model);
+        modelDd.setTitle(a.effortInModel ? "Runs " + resolveVariant(a, model, effortDd.value())
+          : "Model: " + (info.label ? info.label + " (" + model + ")" : model) + (info.detail ? ". " + info.detail : ""));
+        var cli = cliFor(key);
+        effortDd.setTitle(!items.length ? (!cli || (cli.canList && !state.clisListed) ? "Loading this model’s effort levels…" : "This model has no effort setting.")
+          : effortDd.value() ? "Effort: " + effortLabel(effortDd.value()) : "Effort: not set. " + defaultEffortText(a, model) + ".");
       }
-      var models = a.effortInModel ? variantsFor(a).order : modelOptionsFor(a);
-      var modelSel = h("select", { class: "pick", "aria-label": "Model for " + a.id });
-      models.forEach(function (m) {
-        var note = cli && cli.modelNotes && cli.modelNotes[m];
-        modelSel.appendChild(h("option", { value: m, text: m + (note ? " (" + note + ")" : "") }));
-      });
-      if (saved.model && models.indexOf(saved.model) >= 0) modelSel.value = saved.model;
-      // Every seat shows the same effort picker: "default" until one is chosen, then only the
-      // levels this model accepts.
-      var effortSel = h("select", { class: "pick", "aria-label": "Effort for " + a.id });
-      function fillEfforts() {
-        var opts = effortOptionsFor(a, modelSel.value);
-        var keep = effortSel.value || saved.effort || "";
-        effortSel.textContent = "";
-        effortSel.appendChild(h("option", { value: "", text: "effort: default" }));
-        opts.forEach(function (e) { effortSel.appendChild(h("option", { value: e, text: "effort: " + e })); });
-        effortSel.value = opts.indexOf(keep) >= 0 ? keep : "";
-        effortSel.disabled = !opts.length;
-        effortSel.title = !opts.length
-          ? (state.clis ? "This CLI has no effort setting argue can pass, so it uses its own default." : "Loading this model's effort levels…")
-          : a.effortInModel ? "Default runs " + resolveVariant(a, modelSel.value, "") + "."
-          : "Default leaves the effort to " + (cli ? cli.label : "the CLI") + "'s own setting.";
+      // Saved in the workspace config: the desk opens on a new port each time, so the browser would forget.
+      function changed() {
+        refresh(effortDd.value());
+        // The seat's mark follows its model (Antigravity can seat Claude, for one).
+        var nextMark = seatMark(a.id);
+        markEl.replaceWith(nextMark);
+        markEl = nextMark;
+        pick = { model: modelDd.value(), effort: effortDd.value() };
+        cfg.picks = cfg.picks || {};
+        cfg.picks[a.id] = pick;
+        api("/api/desk/seat", { method: "POST", body: { id: a.id, model: pick.model === own ? "" : pick.model, effort: pick.effort } })
+          .catch(function (e) { showFormError("Could not save the model and effort for " + a.id + ": " + e.message); });
       }
-      fillEfforts();
-      function remember() { storeSet("argue.seat." + a.id, { model: modelSel.value, effort: effortSel.value }); }
-      modelSel.addEventListener("change", function () { fillEfforts(); remember(); });
-      effortSel.addEventListener("change", function () { fillEfforts(); remember(); });
+      refresh(pick.effort);
       state.pickers[a.id] = {
-        model: modelSel, effort: effortSel,
         // What this debate runs: Antigravity gets the full model id and no separate effort flag.
         value: function () {
-          return a.effortInModel ? { model: resolveVariant(a, modelSel.value, effortSel.value), effort: "" }
-            : { model: modelSel.value, effort: effortSel.value };
+          var model = modelDd.value(), effort = effortDd.value();
+          return a.effortInModel ? { model: resolveVariant(a, model, effort), effort: "" } : { model: model, effort: effort };
         }
       };
-      var pickers = h("div", { class: "seat-pick" }, modelSel, effortSel);
+      var markEl = seatMark(a.id);
       box.appendChild(h("div", { class: "seat-opt" },
-        h("label", { class: "seat-main" }, cb, mark(a.id), h("span", { text: a.id })),
+        h("label", { class: "seat-main" }, cb, markEl, h("span", { text: a.id })),
         h("button", { class: "rm", type: "button", title: "Remove this seat", "aria-label": "Remove seat " + a.id,
           onclick: function (ev) { ev.preventDefault(); removeSeat(a.id); } }, "×"),
-        pickers));
+        h("div", { class: "seat-pick" }, modelDd.el, effortDd.el)));
     });
   }
-  document.getElementById("rounds").addEventListener("change", function () { state.roundsTouched = true; });
-  document.getElementById("threshold").addEventListener("change", function () { state.thresholdTouched = true; });
   function removeSeat(id) {
-    if (!confirm("Remove the seat \u201c" + id + "\u201d from this workspace? Past debates keep their results.")) return;
-    api("/api/seats/" + encodeURIComponent(id), { method: "DELETE" }).then(function () { return loadConfig().then(loadUsage); })
-      .catch(function (e) { showFormError(e.message); });
+    ask({ title: "Remove this seat?", message: "\u201c" + id + "\u201d leaves this workspace. Past debates keep their results.",
+      confirm: "Remove seat", danger: true }).then(function (yes) {
+      if (!yes) return;
+      api("/api/seats/" + encodeURIComponent(id), { method: "DELETE" }).then(function () { return loadConfig().then(loadUsage); })
+        .catch(function (e) { showFormError(e.message); });
+    });
   }
   function showFormError(msg) {
     var el = document.getElementById("form-error");
@@ -852,8 +1212,8 @@ main { max-width: none; padding: 0 40px 90px; display: flex; flex-direction: col
       btn.textContent = "Starting…";
       return api("/api/runs", { method: "POST", body: {
         task: task, agents: agents, settings: settings, attachments: files,
-        maxRounds: Number(document.getElementById("rounds").value),
-        threshold: Number(document.getElementById("threshold").value)
+        maxRounds: Number(roundsDd.value()),
+        threshold: Number(agreeDd.value())
       } });
     }).then(function (res) {
       document.getElementById("task").value = "";
@@ -880,10 +1240,13 @@ main { max-width: none; padding: 0 40px 90px; display: flex; flex-direction: col
     var box = document.getElementById("attach-list");
     box.textContent = "";
     state.attachments.forEach(function (file, i) {
-      box.appendChild(h("span", { class: "file-chip", title: file.name },
-        h("span", { text: (/\.pdf$/i.test(file.name) ? "📄 " : /\.(png|jpe?g|webp|gif)$/i.test(file.name) ? "🖼 " : "📝 ") + file.name }),
+      box.appendChild(fileChip(file.name,
         h("button", { type: "button", "aria-label": "Remove " + file.name, onclick: function () { state.attachments.splice(i, 1); renderAttachments(); } }, "×")));
     });
+  }
+  // An attached file: its kind's icon and its name (plus a remove button while composing).
+  function fileChip(name, extra) {
+    return h("span", { class: "file-chip", title: name }, icon(fileKind(name)), h("span", { text: name }), extra || null);
   }
   // Files go up as base64 in the start request and are saved next to the run, on this computer.
   function readAttachments() {
@@ -904,6 +1267,7 @@ main { max-width: none; padding: 0 40px 90px; display: flex; flex-direction: col
       var short = document.getElementById("lib-short");
       short.textContent = String(lib.dir).split(/[\\/]/).filter(Boolean).pop() || lib.dir; short.title = lib.dir;
       el.textContent = lib.dir; el.title = lib.dir + (lib.pdf ? "" : "  (no Edge/Chrome found: PDFs are skipped; open report.html and print it)");
+      state.canPrintPdf = !!lib.pdf;
     }).catch(function () {});
   }
   document.getElementById("lib-change").addEventListener("click", function () {
@@ -912,13 +1276,19 @@ main { max-width: none; padding: 0 40px 90px; display: flex; flex-direction: col
       if (res.cancelled) return;
       return loadLibrary();
     }).catch(function () {
-      // No native dialog available: let the user type a path instead.
-      var typed = prompt("Folder for saved debates (full path):", document.getElementById("lib-path").textContent || "");
-      if (!typed) return;
-      return api("/api/library/dir", { method: "POST", body: { dir: typed } }).then(loadLibrary).catch(function (e) { alert(e.message); });
+      // No folder picker on this system: let the user type a path instead.
+      return ask({ title: "Folder for saved debates", message: "Type the full path of the folder to save finished debates in.",
+        input: { value: document.getElementById("lib-path").textContent || "", placeholder: "D:\\Debates" }, confirm: "Use this folder" })
+        .then(function (typed) {
+          if (!typed) return;
+          return api("/api/library/dir", { method: "POST", body: { dir: typed } }).then(loadLibrary)
+            .catch(function (e) { notify(e.message, "error"); });
+        });
     }).then(function () { btn.disabled = false; btn.textContent = "Change folder…"; });
   });
-  document.getElementById("lib-open").addEventListener("click", function () { api("/api/library/open", { method: "POST" }).catch(function (e) { alert(e.message); }); });
+  document.getElementById("lib-open").addEventListener("click", function () {
+    api("/api/library/open", { method: "POST" }).catch(function (e) { notify(e.message, "error"); });
+  });
 
   // ---------- scan for CLIs / connect one ----------
   function seatNameFor(cliType) {
@@ -941,8 +1311,11 @@ main { max-width: none; padding: 0 40px 90px; display: flex; flex-direction: col
   function openScan() {
     var chosen = null;
     var nameInput = h("input", { type: "text", placeholder: "e.g. claude-sonnet" });
-    var modelInput = h("input", { type: "text", list: "model-options", placeholder: "model id" });
-    var modelList = h("datalist", { id: "model-options" });
+    // Known models in the desk's own dropdown; "Other model id…" (or a CLI with no list) types one in.
+    var OTHER = "…other";
+    var modelDd = dropdown({ label: "Model", items: [], onChange: syncModelInput });
+    var modelInput = h("input", { type: "text", placeholder: "model id", "aria-label": "Model id" });
+    function syncModelInput() { modelInput.hidden = !modelDd.el.hidden && modelDd.value() !== OTHER; }
     var cmdInput = h("input", { type: "text", placeholder: "command, e.g. mycli or C:\\tools\\mycli.exe" });
     var argsInput = h("input", { type: "text", placeholder: "flags, e.g. --print --model {providerModel}" });
     var custom = h("div", { style: "display:none;gap:12px", class: "custom-fields" },
@@ -951,7 +1324,7 @@ main { max-width: none; padding: 0 40px 90px; display: flex; flex-direction: col
         h("span", { class: "hint", text: "argue sends the prompt on stdin. Use {providerModel} for the model, or {prompt} if the CLI only takes the prompt as an argument." })));
     var form = h("div", { style: "display:none;gap:12px" },
       h("label", { class: "field" }, "Seat name", nameInput),
-      h("label", { class: "field" }, "Model", modelInput, modelList),
+      h("div", { class: "field" }, h("span", { text: "Model" }), modelDd.el, modelInput),
       custom);
     var err = h("p", { class: "err", hidden: true });
     var list = h("div", { class: "cli-list" }, h("p", { class: "waiting" }, h("span", { class: "dot" }), "Scanning this computer for AI CLIs… (asks each one for its model list: no prompts, no tokens)"));
@@ -974,10 +1347,16 @@ main { max-width: none; padding: 0 40px 90px; display: flex; flex-direction: col
       btn.classList.add("sel");
       form.style.display = "grid";
       custom.style.display = cli.cliType === "text" ? "grid" : "none";
-      modelList.textContent = "";
-      (cli.models || []).forEach(function (m) { modelList.appendChild(h("option", { value: m })); });
-      modelInput.value = (cli.models && cli.models[0]) || "";
+      var items = (cli.models || []).map(function (m) {
+        var info = (cli.modelInfo || {})[m] || {};
+        return { value: m, text: info.label || m, detail: info.label ? m + (info.detail ? " · " + info.detail : "") : info.detail, group: info.group };
+      });
+      if (items.length) items.push({ value: OTHER, text: "Other model id…", detail: cli.modelHint || "Type any id this CLI accepts" });
+      modelDd.setItems(items, items.length ? items[0].value : "");
+      modelDd.el.hidden = !items.length;
+      modelInput.value = "";
       modelInput.placeholder = cli.modelHint || "model id";
+      syncModelInput();
       if (!nameInput.value || nameInput.dataset.auto) { nameInput.value = seatNameFor(cli.cliType === "text" && cli.id ? cli.id : cli.cliType); nameInput.dataset.auto = "1"; }
       save.disabled = false;
     }
@@ -993,10 +1372,13 @@ main { max-width: none; padding: 0 40px 90px; display: flex; flex-direction: col
         var quick = h("button", { class: "btn small pick", type: "button" }, seated.length ? "Add another" : "Add");
         quick.addEventListener("click", function (ev) {
           ev.stopPropagation();
+          var label = quick.textContent;
           quick.disabled = true; quick.textContent = "Adding…";
-          if (cli.unrestricted && !confirm(cli.label + ": " + cli.unrestricted + " Add it anyway?")) { quick.disabled = false; quick.textContent = "Add"; return; }
-          var body = presetBody(cli, seatNameFor(cli.cliType === "text" ? cli.id : cli.cliType), (cli.models && cli.models[0]) || "default");
-          addSeat(body).then(function () { draw(state.lastScan); }).catch(function (e) { err.hidden = false; err.textContent = e.message; quick.disabled = false; quick.textContent = "Add"; });
+          approveUnrestricted(cli).then(function (yes) {
+            if (!yes) { quick.disabled = false; quick.textContent = label; return; }
+            var body = presetBody(cli, seatNameFor(cli.cliType === "text" ? cli.id : cli.cliType), (cli.models && cli.models[0]) || "default");
+            return addSeat(body).then(function () { draw(state.lastScan); });
+          }).catch(function (e) { err.hidden = false; err.textContent = e.message; quick.disabled = false; quick.textContent = label; });
         });
         var b = h("div", { class: "cli-opt", role: "button", tabindex: "0" },
           markTheme(t),
@@ -1006,12 +1388,12 @@ main { max-width: none; padding: 0 40px 90px; display: flex; flex-direction: col
             cli.note ? h("span", { class: "pill revise", title: cli.note, text: "note" }) : null,
           cli.unverified ? h("span", { class: "pill", title: "Set up from this CLI's documentation; argue has not run it on a real install yet. If it fails, check its --help.", text: "untested" }) : null,
           quick);
-        b.addEventListener("click", function () { pick(cli, b); });
+        onActivate(b, function () { pick(cli, b); });
         list.appendChild(b);
       });
       var other = h("div", { class: "cli-opt", role: "button", tabindex: "0" }, h("span", { class: "mark", style: "background:var(--soft)", text: "+" }),
         h("span", null, "Other CLI", h("small", { text: "Any command that reads a prompt and prints an answer" })));
-      other.addEventListener("click", function () { pick({ cliType: "text", models: [] }, other); });
+      onActivate(other, function () { pick({ cliType: "text", models: [] }, other); });
       list.appendChild(other);
       var missing = data.clis.filter(function (c) { return !c.installed; });
       if (missing.length) {
@@ -1020,24 +1402,40 @@ main { max-width: none; padding: 0 40px 90px; display: flex; flex-direction: col
         list.appendChild(d);
       }
     }
-    function run() {
-      scanClis().then(function (data) { state.lastScan = data; draw(data); })
+    function run(fresh) {
+      scanClis(true, fresh).then(function (data) { state.lastScan = data; draw(data); })
         .catch(function (e) { list.textContent = ""; list.appendChild(h("p", { class: "err", text: e.message })); });
     }
-    rescan.addEventListener("click", run);
-    run();
+    rescan.addEventListener("click", function () { run(true); });
+    run(false);
 
     save.addEventListener("click", function () {
       if (!chosen) return;
       err.hidden = true;
-      if (chosen.unrestricted && !confirm(chosen.label + ": " + chosen.unrestricted + " Add it anyway?")) return;
-      var body = presetBody(chosen, nameInput.value.trim(), modelInput.value.trim());
-      if (chosen.cliType === "text" && !chosen.id) {
-        body.command = cmdInput.value.trim();
-        body.args = argsInput.value.trim() ? argsInput.value.trim().split(/\s+/) : [];
-      }
-      save.disabled = true;
-      addSeat(body).then(close).catch(function (e) { err.hidden = false; err.textContent = e.message; save.disabled = false; });
+      var cli = chosen;
+      approveUnrestricted(cli).then(function (yes) {
+        if (!yes) return;
+        var typed = modelDd.el.hidden || modelDd.value() === OTHER;
+        var body = presetBody(cli, nameInput.value.trim(), typed ? modelInput.value.trim() : modelDd.value());
+        if (cli.cliType === "text" && !cli.id) {
+          body.command = cmdInput.value.trim();
+          body.args = argsInput.value.trim() ? argsInput.value.trim().split(/\s+/) : [];
+        }
+        save.disabled = true;
+        return addSeat(body).then(close);
+      }).catch(function (e) { err.hidden = false; err.textContent = e.message; save.disabled = false; });
+    });
+  }
+  // CLIs that approve their own tool use (Kimi, Mistral Vibe) are only added after a warning.
+  function approveUnrestricted(cli) {
+    if (!cli.unrestricted) return Promise.resolve(true);
+    return ask({ title: "Add " + cli.label + "?", message: cli.unrestricted, confirm: "Add anyway", danger: true });
+  }
+  // Click, Enter or Space: for the role="button" rows that are not real buttons.
+  function onActivate(el, fn) {
+    el.addEventListener("click", fn);
+    el.addEventListener("keydown", function (ev) {
+      if (ev.target === el && (ev.key === "Enter" || ev.key === " ")) { ev.preventDefault(); fn(); }
     });
   }
 
@@ -1049,6 +1447,10 @@ main { max-width: none; padding: 0 40px 90px; display: flex; flex-direction: col
   function refreshRuns() {
     return api("/api/runs").then(function (data) {
       state.runs = data.runs;
+      // Redrawn only when something changed, so hover and keyboard focus survive the 5-second refresh.
+      var drawn = JSON.stringify(data.runs) + "|" + state.selected + "|" + new Date().toDateString();
+      if (drawn === state.runsDrawn) return;
+      state.runsDrawn = drawn;
       var box = document.getElementById("runs");
       box.textContent = "";
       if (data.runs.length === 0) box.appendChild(h("p", { class: "hint", style: "padding:0 8px", text: "Your debates will appear here." }));
@@ -1089,6 +1491,7 @@ main { max-width: none; padding: 0 40px 90px; display: flex; flex-direction: col
   function showComposer() {
     clearTimeout(state.pollTimer);
     state.selected = null;
+    state.runSeats = null;
     showView("composer");
     refreshRuns();
     document.getElementById("task").focus();
@@ -1099,6 +1502,7 @@ main { max-width: none; padding: 0 40px 90px; display: flex; flex-direction: col
   function select(requestId) {
     state.selected = requestId;
     if (!state.cache[requestId]) state.cache[requestId] = { events: [], nextSeq: 0, result: null, error: null, process: null, model: emptyModel() };
+    state.cache[requestId].drawn = null;
     showView("run");
     document.getElementById("run-view").textContent = "";
     refreshRuns();
@@ -1120,15 +1524,24 @@ main { max-width: none; padding: 0 40px 90px; display: flex; flex-direction: col
       // A seat just answered: its plan usage changed, so refresh the rings now.
       if (refreshUsage && c.events.length > data.events.length) loadUsage();
       c.result = data.result; c.error = data.error; c.process = data.process;
-      c.saved = data.saved; c.attachments = data.attachments || [];
-      c.model = buildModel(c.events, c.result);
-      render();
+      c.saved = data.saved; c.attachments = data.attachments || []; c.seats = data.seats || null;
+      // Redrawn only when something changed, so text stays selectable while a debate runs.
+      var run = state.runs.filter(function (r) { return r.requestId === id; })[0];
+      var drawn = [c.nextSeq, !!c.result, JSON.stringify(c.error), JSON.stringify(c.process), JSON.stringify(c.saved),
+        c.attachments.join("/"), JSON.stringify(c.seats), run ? runStatus(run) : ""].join("|");
+      if (drawn !== c.drawn) {
+        c.drawn = drawn;
+        c.model = buildModel(c.events, c.result);
+        render();
+      }
       if (!isDone(c)) state.pollTimer = setTimeout(poll, 1500);
       else {
         refreshRuns(); loadUsage();
-        // The desk saves a finished debate to the library a moment after it ends; pick that up.
-        if (c.result && !c.saved && c.process && c.process.exitCode === 0 && (c.saveChecks = (c.saveChecks || 0) + 1) <= 6) {
-          state.pollTimer = setTimeout(poll, 2500);
+        // The desk saves a finished debate to the library a moment after it ends, then prints its
+        // PDF a few seconds later; keep looking until both are there.
+        var waitingForSave = !c.saved || (state.canPrintPdf && !c.saved.hasPdf);
+        if (c.result && waitingForSave && c.process && c.process.exitCode === 0 && (c.saveChecks = (c.saveChecks || 0) + 1) <= 10) {
+          state.pollTimer = setTimeout(poll, 2000);
         }
       }
     }).catch(function () { if (!state.closed) state.pollTimer = setTimeout(poll, 3000); });
@@ -1201,6 +1614,7 @@ main { max-width: none; padding: 0 40px 90px; display: flex; flex-direction: col
         r.merges.forEach(function (mg) { m.merges.push(mg); });
       });
       m.finalized = { status: result.status };
+      (result.eliminations || []).forEach(function (el) { m.eliminated[el.participantId] = { round: el.round, reason: el.reason, error: el.error }; });
     }
     if (result && result.task) m.task = result.task.prompt;
     if (result && result.finalClaims) result.finalClaims.forEach(function (fc) {
@@ -1225,6 +1639,9 @@ main { max-width: none; padding: 0 40px 90px; display: flex; flex-direction: col
   function render() {
     var c = state.cache[state.selected]; if (!c) return;
     var m = c.model; var result = c.result;
+    // The model and effort each seat ran with, for its marks and labels.
+    state.runSeats = null;
+    if (c.seats) { state.runSeats = {}; c.seats.forEach(function (seat) { state.runSeats[seat.id] = seat; }); }
     // The open debate draws into its own section; the "new debate" composer stays intact beside it.
     var main = document.getElementById("run-view");
     var scrollY = window.scrollY;
@@ -1234,23 +1651,26 @@ main { max-width: none; padding: 0 40px 90px; display: flex; flex-direction: col
 
     var run = state.runs.filter(function (r) { return r.requestId === state.selected; })[0];
     var status = result ? result.status : m.failed || c.error ? "failed" : run ? runStatus(run) : "in_progress";
-    var title = result && result.task ? result.task.title || result.task.prompt :
-      (run && (run.title || run.prompt)) || (c.process && c.process.task) || "Debate";
     var running = c.process && c.process.state === "running";
     var asked = stripAttachmentNote((result && result.task && result.task.prompt) || (c.process && c.process.task) || (run && run.prompt) || "");
+    var files = c.attachments || [];
 
-    // Like a chat: your question first, then the panel's answer.
-    if (asked) main.appendChild(h("div", { class: "question" }, h("div", { class: "bubble" }, h("small", { text: "You asked" }), asked)));
-    main.appendChild(h("div", { class: "head" },
-      h("h1", { text: title }),
+    // Like a chat: your question (with its files) once, one line of status and actions, then the answer.
+    if (asked || files.length) {
+      main.appendChild(h("div", { class: "question" }, h("div", { class: "bubble" }, h("small", { text: "You asked" }),
+        asked ? h("div", { class: "asked", text: asked }) : null,
+        files.length ? h("div", { class: "bubble-files" }, files.map(function (name) { return fileChip(name); })) : null)));
+    }
+    main.appendChild(h("div", { class: "run-bar" },
       h("div", { class: "meta" }, statusPill(status),
-        m.participants.map(function (id) { return h("span", { class: "chip" }, mark(id), id, m.eliminated[id] ? " (out)" : ""); }),
+        m.participants.map(function (id) {
+          var out = m.eliminated[id] ? dropReason(m.eliminated[id].reason, m.eliminated[id].error) : null;
+          return h("span", { class: "chip", title: seatUsedText(id) + (out ? " · " + out.label : "") }, mark(id), id, out ? (out.limit ? " (limit)" : " (out)") : "");
+        }),
         result && result.metrics ? h("span", { text: fmtElapsed(result.metrics.elapsedMs) + " · " + result.metrics.totalRounds + " rounds" }) : null,
-        h("span", { class: "mono", text: fmtWhen(state.selected) })),
-      c.attachments && c.attachments.length ? h("div", { class: "attached", text: "📎 " + c.attachments.join(", ") }) : null,
-      running ? h("div", null, h("button", { class: "btn danger small", onclick: stopRun }, "Stop debate")) : null,
-      result ? renderRunActions(c, result) : null
-    ));
+        h("span", { text: fmtWhen(state.selected) })),
+      running ? h("div", { class: "run-actions" }, h("button", { class: "btn danger small", onclick: stopRun }, icon("stop"), "Stop debate")) : null,
+      result ? renderRunActions(c, result) : null));
 
     if (result) main.appendChild(renderVerdict(result, m, openDetails));
     if (c.error || m.failed) main.appendChild(h("div", { class: "card verdict failed" },
@@ -1279,22 +1699,23 @@ main { max-width: none; padding: 0 40px 90px; display: flex; flex-direction: col
   // Saved-debate actions: open the PDF / report / folder with the OS, save now, or run it again.
   function renderRunActions(c, result) {
     var id = state.selected;
-    function open(what) { api("/api/runs/" + encodeURIComponent(id) + "/open", { method: "POST", body: { what: what } }).catch(function (e) { alert(e.message); }); }
+    function open(what) { api("/api/runs/" + encodeURIComponent(id) + "/open", { method: "POST", body: { what: what } }).catch(function (e) { notify(e.message, "error"); }); }
     var bar = h("div", { class: "run-actions" });
     if (c.saved) {
-      if (c.saved.hasPdf) bar.appendChild(h("button", { class: "btn ghost small", onclick: function () { open("pdf"); } }, "📄 Open PDF"));
-      bar.appendChild(h("button", { class: "btn ghost small", onclick: function () { open("html"); } }, "🌐 Open report"));
-      bar.appendChild(h("button", { class: "btn ghost small", onclick: function () { open("folder"); } }, "📁 Show in folder"));
+      if (c.saved.hasPdf) bar.appendChild(h("button", { class: "btn ghost small", onclick: function () { open("pdf"); } }, icon("file"), "Open PDF"));
+      bar.appendChild(h("button", { class: "btn ghost small", onclick: function () { open("html"); } }, icon("globe"), "Open report"));
+      bar.appendChild(h("button", { class: "btn ghost small", onclick: function () { open("folder"); } }, icon("folder"), "Show in folder"));
     } else {
-      var save = h("button", { class: "btn ghost small" }, "💾 Save to library");
+      var saveLabel = h("span", { text: "Save to library" });
+      var save = h("button", { class: "btn ghost small" }, icon("save"), saveLabel);
       save.addEventListener("click", function () {
-        save.disabled = true; save.textContent = "Saving…";
+        save.disabled = true; saveLabel.textContent = "Saving…";
         api("/api/runs/" + encodeURIComponent(id) + "/save", { method: "POST" }).then(function () { c.saveChecks = 0; poll(); })
-          .catch(function (e) { alert(e.message); save.disabled = false; save.textContent = "💾 Save to library"; });
+          .catch(function (e) { notify(e.message, "error"); save.disabled = false; saveLabel.textContent = "Save to library"; });
       });
       bar.appendChild(save);
     }
-    bar.appendChild(h("button", { class: "btn ghost small", onclick: function () { runAgain(result); } }, "↻ Run again"));
+    bar.appendChild(h("button", { class: "btn ghost small", onclick: function () { runAgain(result); } }, icon("again"), "Run again"));
     return bar;
   }
   // Puts the same question and seats back in the form so the debate can be rerun or tweaked.
@@ -1465,7 +1886,11 @@ main { max-width: none; padding: 0 40px 90px; display: flex; flex-direction: col
     }
     if (result.eliminations && result.eliminations.length) {
       card.appendChild(h("div", { class: "block-label", text: "Seats that dropped out" }));
-      result.eliminations.forEach(function (el) { card.appendChild(h("p", { class: "rationale", text: el.participantId + " in round " + el.round + " (" + el.reason + ")" })); });
+      result.eliminations.forEach(function (el) {
+        var known = m.eliminated[el.participantId] || {};
+        var drop = dropReason(el.reason, el.error || known.error);
+        card.appendChild(h("p", { class: "rationale" }, h("b", { text: el.participantId }), " in round " + el.round + ": " + drop.label + (drop.limit && drop.text ? " — " + drop.text : "")));
+      });
     }
     return h("div", { class: "section", style: "margin-top:0" }, h("h3", { text: "Verdict" }), card);
   }
@@ -1481,7 +1906,7 @@ main { max-width: none; padding: 0 40px 90px; display: flex; flex-direction: col
       (resp && resp.judgementsDetail || []).forEach(function (j) { if (stances[j.stance] !== undefined) stances[j.stance] += 1; });
       (resp && resp.claimVotesDetail || []).forEach(function (v) { if (votes[v.vote] !== undefined) votes[v.vote] += 1; });
       var st = !resp ? "thinking" : resp.eliminated ? "dropped" : "done";
-      return h("span", { class: "seat-chip " + st }, mark(pid), pid,
+      return h("span", { class: "seat-chip " + st, title: st === "dropped" ? dropReason(resp.reason, resp.error).label : null }, mark(pid), pid,
         st === "thinking" ? h("span", { class: "dot" }) : h("span", { class: "st", text: st === "dropped" ? "✕" : "✓" }));
     });
     var stats = [];
@@ -1510,10 +1935,10 @@ main { max-width: none; padding: 0 40px 90px; display: flex; flex-direction: col
   function renderLane(r, pid, m, openDetails) {
     var resp = r.responses[pid];
     var lane = h("div", { class: "card lane", style: themeVars(themeFor(pid)) },
-      h("div", { class: "lane-head" }, mark(pid), h("b", { text: pid }), h("span", { class: "model", text: agentModel(pid) }),
-        !resp ? null : resp.eliminated ? h("span", { class: "pill eliminated", text: "dropped: " + resp.reason }) : null));
+      h("div", { class: "lane-head" }, mark(pid), h("b", { text: pid }), h("span", { class: "model", text: seatUsedText(pid) }),
+        !resp ? null : resp.eliminated ? h("span", { class: "pill " + (dropReason(resp.reason, resp.error).limit ? "limit" : "eliminated"), text: dropReason(resp.reason, resp.error).label }) : null));
     if (!resp) { lane.appendChild(h("p", { class: "waiting" }, h("span", { class: "dot" }), "thinking…")); return lane; }
-    if (resp.eliminated) { lane.appendChild(h("p", { class: "mono", text: String(resp.error || "no details") })); return lane; }
+    if (resp.eliminated) { lane.appendChild(dropDetails(dropReason(resp.reason, resp.error))); return lane; }
 
     if (resp.summary) lane.appendChild(h("p", { class: "summary", text: resp.summary }));
 
@@ -1611,8 +2036,12 @@ main { max-width: none; padding: 0 40px 90px; display: flex; flex-direction: col
   }
 
   function stopRun() {
-    if (!confirm("Stop this debate? The agents will be stopped and no result will be written.")) return;
-    api("/api/runs/" + encodeURIComponent(state.selected) + "/stop", { method: "POST" }).then(poll).catch(function (e) { alert(e.message); });
+    var id = state.selected;
+    ask({ title: "Stop this debate?", message: "The agents stop now and no result is written.", confirm: "Stop debate", danger: true })
+      .then(function (yes) {
+        if (!yes) return;
+        api("/api/runs/" + encodeURIComponent(id) + "/stop", { method: "POST" }).then(poll).catch(function (e) { notify(e.message, "error"); });
+      });
   }
 
   // ---------- usage rings ----------
@@ -1676,7 +2105,9 @@ main { max-width: none; padding: 0 40px 90px; display: flex; flex-direction: col
         pod.tip.appendChild(h("div", { class: "w" }, h("span", { text: w.label + " limit" }), h("span", { text: Math.round(100 - w.usedPercent) + "% left" }),
           h("small", { text: fmtReset(w.resetsAt) })));
       });
-      pod.tip.appendChild(h("div", { class: "muted", text: (u.source === "claude" ? "Reported by Claude with its last answer" : "Read from Codex's own log") + (u.observedAt ? ", " + fmtAgo(u.observedAt) : "") + ". Shared with everything else you use this plan for." }));
+      var from = u.live ? "Checked with your Codex account" : u.source === "claude" ? "Reported by Claude with its last answer" : "Read from Codex's own log";
+      pod.tip.appendChild(h("div", { class: "muted", text: from + (u.observedAt ? ", " + fmtAgo(u.observedAt) : "") + ". Shared with everything else you use this plan for." +
+        (u.source === "claude" ? " Claude Code can only report usage with an answer, so this updates when Claude answers." : " Refreshed every minute.") }));
     } else if (u.kind === "tokens") {
       pod.num.textContent = fmtTokens(u.totalTokens);
       pod.num.appendChild(h("small", { text: " tokens" }));
@@ -1717,8 +2148,10 @@ main { max-width: none; padding: 0 40px 90px; display: flex; flex-direction: col
   // ---------- quit ----------
   document.getElementById("quit").addEventListener("click", function () {
     var running = Object.keys(state.cache).some(function (id) { var c = state.cache[id]; return c.process && c.process.state === "running"; });
-    if (running && !confirm("A debate is still running. Quitting stops it too. Quit?")) return;
-    api("/api/shutdown", { method: "POST" }).then(showClosed).catch(showClosed);
+    (running ? ask({ title: "Quit the desk?", message: "A debate is still running. Quitting stops it too.", confirm: "Quit", danger: true })
+      : Promise.resolve(true)).then(function (yes) {
+      if (yes) api("/api/shutdown", { method: "POST" }).then(showClosed).catch(showClosed);
+    });
   });
   function showClosed() {
     state.closed = true;
@@ -1743,9 +2176,15 @@ main { max-width: none; padding: 0 40px 90px; display: flex; flex-direction: col
     return;
   }
   applyTheme();
-  loadConfig().then(function () { loadUsage(); loadLibrary(); scanClis().catch(function () {}); return refreshRuns(); }).then(function () { showView("composer"); });
+  loadConfig().then(function () {
+    loadUsage(); loadLibrary();
+    scanClis(false).catch(function () {});
+    scanClis(true).catch(function () {});
+    return refreshRuns();
+  }).then(function () { showView("composer"); });
   setInterval(function () { if (!state.closed) refreshRuns(); }, 5000);
-  setInterval(loadUsage, 30000);
+  // Plan usage every minute (and right after any seat answers, from poll()).
+  setInterval(loadUsage, 60000);
 })();
 </script>
 </body>

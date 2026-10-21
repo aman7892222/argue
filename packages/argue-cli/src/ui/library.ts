@@ -1,8 +1,9 @@
 import { spawn } from "node:child_process";
-import { access, mkdir, mkdtemp, readdir, readFile, rm, stat, writeFile } from "node:fs/promises";
+import { access, copyFile, mkdir, mkdtemp, readdir, readFile, rm, stat, writeFile } from "node:fs/promises";
 import { tmpdir } from "node:os";
 import { isAbsolute, join, relative, resolve } from "node:path";
 import { pathToFileURL } from "node:url";
+import { moveIntoPlace, tempPathFor, writeFileAtomic } from "../atomic-write.js";
 import type { LoadedCliConfig } from "../config.js";
 import { REQUEST_ID_PATTERN } from "../request-id.js";
 import { renderReportHtml, type ReportSeat } from "./report.js";
@@ -52,6 +53,9 @@ export function debateFolderName(title: string, when: Date): string {
   return `${stamp} ${clean || "debate"}`;
 }
 
+// The desk lists the library every few seconds: each debate.json is parsed again only when it changes.
+const entryCache = new Map<string, { stamp: string; entry: Omit<LibraryEntry, "hasPdf"> | null }>();
+
 export async function listLibrary(dir: string): Promise<LibraryEntry[]> {
   let names: string[];
   try {
@@ -59,24 +63,37 @@ export async function listLibrary(dir: string): Promise<LibraryEntry[]> {
   } catch {
     return [];
   }
-  const entries: LibraryEntry[] = [];
-  for (const name of names) {
-    const folder = join(dir, name);
-    const saved = await readSaved(folder);
-    if (!saved) continue;
-    const requestId = saved.result.requestId;
-    if (typeof requestId !== "string" || !REQUEST_ID_PATTERN.test(requestId)) continue;
-    const task = (saved.result.task ?? {}) as { title?: string; prompt?: string };
-    entries.push({
-      requestId,
-      title: task.title || task.prompt || name,
-      status: String(saved.result.status ?? "unknown"),
-      savedAt: saved.savedAt,
-      folder,
-      hasPdf: await exists(join(folder, "report.pdf"))
-    });
-  }
-  return entries.sort((a, b) => b.requestId.localeCompare(a.requestId));
+  const entries = await Promise.all(
+    names.map(async (name): Promise<LibraryEntry | null> => {
+      const folder = join(dir, name);
+      const file = join(folder, "debate.json");
+      const info = await stat(file).catch(() => null);
+      if (!info?.isFile()) return null;
+      const stamp = `${info.mtimeMs}:${info.size}`;
+      let cached = entryCache.get(file);
+      if (cached?.stamp !== stamp) {
+        cached = { stamp, entry: summarizeSaved(await readSaved(folder), folder, name) };
+        entryCache.set(file, cached);
+      }
+      return cached.entry ? { ...cached.entry, hasPdf: await exists(join(folder, "report.pdf")) } : null;
+    })
+  );
+  return entries
+    .filter((entry): entry is LibraryEntry => entry !== null)
+    .sort((a, b) => b.requestId.localeCompare(a.requestId));
+}
+
+function summarizeSaved(saved: SavedDebate | null, folder: string, name: string): Omit<LibraryEntry, "hasPdf"> | null {
+  const requestId = saved?.result.requestId;
+  if (!saved || typeof requestId !== "string" || !REQUEST_ID_PATTERN.test(requestId)) return null;
+  const task = (saved.result.task ?? {}) as { title?: string; prompt?: string };
+  return {
+    requestId,
+    title: task.title || task.prompt || name,
+    status: String(saved.result.status ?? "unknown"),
+    savedAt: saved.savedAt,
+    folder
+  };
 }
 
 export async function readSaved(folder: string): Promise<SavedDebate | null> {
@@ -117,16 +134,15 @@ export async function saveToLibrary(args: {
     attachments: args.attachments,
     result: args.result
   };
-  await writeFile(join(folder, "debate.json"), `${JSON.stringify(saved, null, 2)}\n`, "utf8");
-  await writeFile(
+  await writeFileAtomic(join(folder, "debate.json"), `${JSON.stringify(saved, null, 2)}\n`);
+  await writeFileAtomic(
     join(folder, "report.html"),
     renderReportHtml(args.result as never, {
       reasoning: true,
       seats: args.seats,
       attachments: args.attachments,
       savedAt: when
-    }),
-    "utf8"
+    })
   );
 
   const browser = args.browser === undefined ? await findPdfBrowser() : args.browser;
@@ -174,6 +190,9 @@ async function printToPdf(browser: string, html: string, outPath: string): Promi
   const work = await mkdtemp(join(tmpdir(), "argue-pdf-"));
   try {
     const page = join(work, "report.html");
+    // Printed inside the work folder first, so an older report.pdf in the library can never pass
+    // for the new one, and the library only ever holds a finished PDF.
+    const printed = join(work, "report.pdf");
     await writeFile(page, html, "utf8");
     const ok = await new Promise<boolean>((done) => {
       const child = spawn(
@@ -187,7 +206,7 @@ async function printToPdf(browser: string, html: string, outPath: string): Promi
           "--disable-sync",
           `--user-data-dir=${join(work, "profile")}`,
           "--no-pdf-header-footer",
-          `--print-to-pdf=${outPath}`,
+          `--print-to-pdf=${printed}`,
           pathToFileURL(page).href
         ],
         { stdio: "ignore", windowsHide: true }
@@ -201,7 +220,12 @@ async function printToPdf(browser: string, html: string, outPath: string): Promi
     });
     // Edge's launcher can exit before the PDF is written, so wait for the file to appear and
     // stop growing before cleaning up the temporary profile it is still using.
-    return ok && (await waitForStableFile(outPath, 30_000));
+    if (!ok || !(await waitForStableFile(printed, 30_000))) return false;
+    // The work folder can be on another drive: copy next to the target, then swap it in.
+    const staged = tempPathFor(outPath);
+    await copyFile(printed, staged);
+    await moveIntoPlace(staged, outPath);
+    return true;
   } finally {
     await rm(work, { recursive: true, force: true }).catch(() => {});
   }

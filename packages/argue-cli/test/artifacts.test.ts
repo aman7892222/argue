@@ -293,7 +293,7 @@ describe("buildResultSummary", () => {
     );
 
     expect(summary).toContain("## Eliminations");
-    expect(summary).toContain("agent-c: timeout (round 2)");
+    expect(summary).toContain("agent-c: did not answer in time (round 2)");
   });
 
   it("omits disagreements section when absent or empty", () => {

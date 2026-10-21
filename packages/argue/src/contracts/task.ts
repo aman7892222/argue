@@ -51,6 +51,54 @@ export const FinalVoteTaskOutputContentSchema = z.object({
   claimVotes: z.array(ClaimVoteInputSchema).min(1)
 });
 
+/**
+ * Rescues a round answer that fails its schema only in places a seat can do without: list
+ * entries that are malformed (a judgement with no stance, a vote for no claim) are set aside,
+ * and an over-long task title is shortened. Returns null when the answer is still invalid, or
+ * when nothing could be rescued; `setAside` names each change, e.g. "judgements[17]: stance: Required".
+ */
+export function salvageRoundOutputContent(
+  phase: z.infer<typeof PhaseSchema>,
+  candidate: unknown
+): { content: Record<string, unknown>; setAside: string[] } | null {
+  if (!candidate || typeof candidate !== "object" || Array.isArray(candidate)) return null;
+  const input: Record<string, unknown> = { ...(candidate as Record<string, unknown>) };
+  const setAside: string[] = [];
+  const keepValid = (key: string, item: z.ZodTypeAny): void => {
+    const list = input[key];
+    if (!Array.isArray(list)) return;
+    input[key] = list.filter((entry, index) => {
+      const parsed = item.safeParse(entry);
+      if (!parsed.success) setAside.push(`${key}[${index}]: ${describeIssue(parsed.error)}`);
+      return parsed.success;
+    });
+  };
+  keepValid("judgements", ClaimJudgementSchema);
+  keepValid("extractedClaims", ExtractedClaimOutputSchema);
+  if (phase === "final_vote") keepValid("claimVotes", ClaimVoteInputSchema);
+  if (phase === "initial" && typeof input.taskTitle === "string" && input.taskTitle.length > ARGUE_TASK_TITLE_MAX) {
+    input.taskTitle = `${input.taskTitle.slice(0, ARGUE_TASK_TITLE_MAX - 1).trimEnd()}…`;
+    setAside.push(`taskTitle: shortened to ${ARGUE_TASK_TITLE_MAX} characters`);
+  }
+  if (!setAside.length) return null;
+
+  const schema =
+    phase === "initial"
+      ? InitialRoundTaskOutputContentSchema
+      : phase === "debate"
+        ? DebateRoundTaskOutputContentSchema
+        : FinalVoteTaskOutputContentSchema;
+  const parsed = schema.safeParse(input);
+  return parsed.success ? { content: parsed.data as Record<string, unknown>, setAside } : null;
+}
+
+function describeIssue(error: z.ZodError): string {
+  const issue = error.issues[0];
+  if (!issue) return "invalid";
+  const where = issue.path.length ? `${issue.path.join(".")}: ` : "";
+  return `${where}${issue.message}`.slice(0, 160);
+}
+
 export const ReportTaskOutputContentSchema = FinalReportSchema;
 
 export type RoundOutputContentSchemaRef =

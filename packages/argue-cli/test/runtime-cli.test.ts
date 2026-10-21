@@ -644,9 +644,8 @@ process.stdout.write(JSON.stringify(output));
       models: { fake: {} }
     });
 
-    await expect(runner.runTask({ task: makeRoundTask(), agent })).rejects.toThrow(
-      /status=ERROR error=quota exhausted/
-    );
+    // A quota error is the seat's plan running out: the desk shows it as "plan limit reached".
+    await expect(runner.runTask({ task: makeRoundTask(), agent })).rejects.toThrow(/^plan_limit: quota exhausted$/);
   });
 
   it("text cliType adds no flags of its own and sends the prompt on stdin", async () => {

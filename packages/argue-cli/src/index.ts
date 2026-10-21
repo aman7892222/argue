@@ -20,6 +20,7 @@ import {
   type LoadedCliConfig,
   type ResolveConfigPathOptions
 } from "./config.js";
+import { writeFileAtomic } from "./atomic-write.js";
 import { addProviderCommand, detectClis, formatDetectedClis } from "./cli-catalog.js";
 import { executeHeadlessRun } from "./headless-run.js";
 import { createOutputFormatter } from "./output.js";
@@ -1577,7 +1578,7 @@ async function fileExists(path: string): Promise<boolean> {
 
 async function writeConfigFile(path: string, nextConfig: unknown): Promise<void> {
   await mkdir(dirname(path), { recursive: true });
-  await writeFile(path, `${JSON.stringify(nextConfig, null, 2)}\n`, "utf8");
+  await writeFileAtomic(path, `${JSON.stringify(nextConfig, null, 2)}\n`);
 }
 
 function parseCsvList(raw: string): string[] {

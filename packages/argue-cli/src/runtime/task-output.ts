@@ -7,6 +7,7 @@ import {
   ReportOutputContentJsonSchema,
   ReportTaskOutputContentSchema,
   getRoundOutputContentJsonSchema,
+  salvageRoundOutputContent,
   type AgentTaskInput,
   type AgentTaskResult,
   type ReportTaskInput,
@@ -63,7 +64,7 @@ export function normalizeTaskOutput(task: AgentTaskInput, candidate: unknown): A
     };
   }
 
-  const roundContent = getRoundContentSchema(task).parse(candidate);
+  const roundContent = parseRoundContent(task, candidate);
   return {
     kind: "round",
     output: {
@@ -120,6 +121,22 @@ function assertWrappedOutputMatchesTask(task: AgentTaskInput, result: AgentTaskR
   if (roundResult.output.round !== task.round) {
     throw new Error(`Round output round mismatch: expected ${task.round}, got ${roundResult.output.round}`);
   }
+}
+
+/**
+ * A round answer, checked strictly first. If only some entries are malformed (one judgement
+ * with no stance, say), those are set aside so the seat stays in the debate; the answer still
+ * fails, and the seat drops out, when nothing usable is left.
+ */
+function parseRoundContent(task: RoundTaskInput, candidate: unknown): z.infer<z.ZodTypeAny> {
+  const strict = getRoundContentSchema(task).safeParse(candidate);
+  if (strict.success) return strict.data;
+  const salvaged = salvageRoundOutputContent(task.phase, candidate);
+  if (!salvaged) throw strict.error;
+  process.stderr.write(
+    `[argue] ${task.participantId} (round ${task.round}): kept its answer, set aside ${salvaged.setAside.join("; ")}\n`
+  );
+  return salvaged.content;
 }
 
 function getRoundContentSchema(task: RoundTaskInput): z.ZodTypeAny {

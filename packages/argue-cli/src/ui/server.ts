@@ -8,9 +8,19 @@ import { fileURLToPath } from "node:url";
 import { DESK_THEMES, loadWorkspaceConfig, type DeskTheme, type LoadedCliConfig } from "../config.js";
 import { newRequestId, REQUEST_ID_PATTERN } from "../request-id.js";
 import { resolveOutputPaths, resolveRunPlan } from "../run-plan.js";
-import { catalogId, detectClis, KNOWN_CLIS } from "../cli-catalog.js";
+import {
+  cachedModelLabels,
+  catalogId,
+  detectClis,
+  KNOWN_CLIS,
+  modelLabel,
+  modelsCachePath,
+  saveModelsCache,
+  withCachedListings,
+  type DetectedCli
+} from "../cli-catalog.js";
 import { readSeatUsage } from "../usage.js";
-import { addSeat, parseAddSeatRequest, removeSeat, writeValidated } from "./seats.js";
+import { addSeat, parseAddSeatRequest, parseSeatPick, removeSeat, saveSeatPick, updateConfig } from "./seats.js";
 import {
   chooseFolderDialog,
   findPdfBrowser,
@@ -21,6 +31,7 @@ import {
   saveToLibrary
 } from "./library.js";
 import { renderUiPage } from "./page.js";
+import type { ReportSeat } from "./report.js";
 
 const TOKEN_PLACEHOLDER = "{requestId}";
 const MAX_BODY_BYTES = 64 * 1024;
@@ -40,6 +51,8 @@ export type UiServerOptions = {
    * The open page polls every few seconds, so this only fires after the tab is closed.
    */
   idleExitMs?: number;
+  /** Where the last model listing is kept between launches (defaults to ~/.argue/models-cache.json). */
+  modelsCachePath?: string;
 };
 
 export type UiServer = {
@@ -78,6 +91,23 @@ export async function startUiServer(options: UiServerOptions = {}): Promise<UiSe
 
   // Workspace loader: the desk must work with 0 or 1 seats while you are setting it up.
   const loadConfig = (): Promise<LoadedCliConfig> => loadWorkspaceConfig({ explicitPath: options.configPath });
+  // The full model listing takes seconds (it runs agy models, codex debug models...): one run is
+  // shared until the page asks to scan again, and kept on disk for the next launch.
+  const cachePath = options.modelsCachePath ?? modelsCachePath();
+  let listing: Promise<DetectedCli[]> | null = null;
+  const listClis = (fresh: boolean): Promise<DetectedCli[]> => {
+    if (!listing || fresh) {
+      const run = detectClis({ list: true });
+      listing = run;
+      run.then(
+        (detected) => saveModelsCache(cachePath, detected).catch(() => undefined),
+        () => {
+          if (listing === run) listing = null;
+        }
+      );
+    }
+    return listing;
+  };
   let lastSeen = Date.now();
   let resolveClosed: () => void = () => {};
   const closed = new Promise<void>((resolve) => (resolveClosed = resolve));
@@ -154,8 +184,12 @@ export async function startUiServer(options: UiServerOptions = {}): Promise<UiSe
 
     if (req.method === "GET" && url.pathname === "/api/clis") {
       // Lists installed agent CLIs and their models. Model listing (agy models, codex debug models)
-      // asks the CLI for its catalog; it does not send any prompt or spend tokens.
-      const detected = await detectClis({ list: url.searchParams.get("list") === "1" });
+      // asks the CLI for its catalog; it does not send any prompt or spend tokens. Without ?list=1
+      // it only looks for the CLIs, filling in what they listed last time.
+      const detected =
+        url.searchParams.get("list") === "1"
+          ? await listClis(url.searchParams.get("fresh") === "1")
+          : await withCachedListings(cachePath, await detectClis({ list: false }));
       sendJson(res, 200, {
         clis: detected.map((d) => ({
           id: catalogId(d.cli),
@@ -171,7 +205,10 @@ export async function startUiServer(options: UiServerOptions = {}): Promise<UiSe
           efforts: d.efforts,
           effortsByModel: d.effortsByModel,
           effortInModel: !!d.cli.effortInModelName,
-          modelNotes: d.cli.modelNotes ?? {},
+          // Its model list comes from the CLI itself, so it may still be loading.
+          canList: !!(d.cli.listModelsArgs && d.cli.parseModels),
+          modelInfo: d.modelInfo,
+          modelAliases: d.cli.modelAliases ?? {},
           note: d.cli.note ?? null,
           install: d.cli.install
         }))
@@ -233,7 +270,9 @@ export async function startUiServer(options: UiServerOptions = {}): Promise<UiSe
           agents: loaded.config.defaults?.defaultAgents ?? loaded.config.agents.map((agent) => agent.id),
           maxRounds: loaded.config.defaults?.maxRounds ?? 3,
           threshold: loaded.config.defaults?.consensusThreshold ?? 1
-        }
+        },
+        // The model and effort last picked for each seat on this desk.
+        picks: loaded.config.desk?.seats ?? {}
       });
       return;
     }
@@ -242,12 +281,18 @@ export async function startUiServer(options: UiServerOptions = {}): Promise<UiSe
       const loaded = await loadConfig();
       // One entry per CLI kind, listing the agents that draw on that subscription.
       const seats = new Map<string, string[]>();
+      let codexCommand: string | undefined;
       for (const agent of loaded.config.agents) {
         const provider = loaded.config.providers[agent.provider];
         if (provider?.type !== "cli") continue;
         seats.set(provider.cliType, [...(seats.get(provider.cliType) ?? []), agent.id]);
+        if (provider.cliType === "codex") codexCommand ??= provider.command ?? "codex";
       }
-      const usage = await readSeatUsage([...seats.keys()]);
+      // The page asks every minute; Codex's limits come live from its account (no prompt).
+      const usage = await readSeatUsage(
+        [...seats.keys()],
+        codexCommand ? { liveCodex: { command: codexCommand } } : {}
+      );
       sendJson(res, 200, {
         seats: [...seats.entries()].map(([cliType, agents]) => ({
           cliType,
@@ -302,11 +347,26 @@ export async function startUiServer(options: UiServerOptions = {}): Promise<UiSe
         return;
       }
       const loaded = await loadConfig();
-      const raw = JSON.parse(await readFile(loaded.configPath, "utf8")) as Record<string, unknown>;
-      const desk = raw.desk && typeof raw.desk === "object" ? (raw.desk as Record<string, unknown>) : {};
-      raw.desk = { ...desk, theme };
-      await writeValidated(loaded.configPath, raw);
+      await updateConfig(loaded.configPath, (config) => {
+        config.desk = { ...config.desk, theme };
+      });
       sendJson(res, 200, { theme });
+      return;
+    }
+
+    if (req.method === "POST" && url.pathname === "/api/desk/seat") {
+      // A seat's model/effort pick, kept in the config for the same reason as the theme.
+      const loaded = await loadConfig();
+      const parsed = parseSeatPick(
+        await readBody(req),
+        loaded.config.agents.map((agent) => agent.id)
+      );
+      if (!parsed.ok) {
+        sendJson(res, 400, { error: parsed.error });
+        return;
+      }
+      await saveSeatPick(loaded.configPath, parsed.id, parsed.pick);
+      sendJson(res, 200, { ok: true });
       return;
     }
 
@@ -338,7 +398,7 @@ export async function startUiServer(options: UiServerOptions = {}): Promise<UiSe
       if (action === "save" && req.method === "POST") {
         const loaded = await loadConfig();
         try {
-          sendJson(res, 200, await saveRun(loaded, requestId, launched.get(requestId)?.settings));
+          sendJson(res, 200, await saveRun(loaded, requestId, launched.get(requestId)?.settings, cachePath));
         } catch (error) {
           sendJson(res, 400, { error: error instanceof Error ? error.message : String(error) });
         }
@@ -373,15 +433,20 @@ export async function startUiServer(options: UiServerOptions = {}): Promise<UiSe
         const events = await readEvents(paths.jsonlPath);
         let result = await readJson(paths.resultPath);
         const entry = (await listLibrary(libraryDir(loaded))).find((e) => e.requestId === requestId);
-        if (!result && entry) result = (await readSaved(entry.folder))?.result ?? null;
+        const run = launched.get(requestId);
+        // Saved debates carry the seats they ran with; they are read only when needed.
+        const saved = entry && (!result || !run) ? await readSaved(entry.folder) : null;
+        if (!result && saved) result = saved.result;
         sendJson(res, 200, {
           requestId,
           events: events.filter((event) => typeof event.seq === "number" && event.seq >= since),
           result,
           error: await readJson(paths.errorPath),
-          process: describeLaunch(launched.get(requestId)),
+          process: describeLaunch(run),
           saved: entry ? { folder: entry.folder, hasPdf: entry.hasPdf } : null,
-          attachments: await listAttachmentNames(attachmentsDirFor(paths, requestId))
+          attachments: await listAttachmentNames(attachmentsDirFor(paths, requestId)),
+          // The model and effort each seat used in this debate (null when it was run elsewhere).
+          seats: run ? seatsUsed(loaded, run.settings) : (saved?.seats ?? null)
         });
         return;
       }
@@ -478,7 +543,7 @@ export async function startUiServer(options: UiServerOptions = {}): Promise<UiSe
         run.exitCode = code;
         // Finished debates go to the library (PDF + HTML + JSON) automatically.
         if (code === 0) {
-          void saveRun(loaded, requestId, run.settings).then(
+          void saveRun(loaded, requestId, run.settings, cachePath).then(
             (saved) => (run.saved = saved),
             (error: unknown) => (run.saveError = error instanceof Error ? error.message : String(error))
           );
@@ -525,9 +590,9 @@ export async function startUiServer(options: UiServerOptions = {}): Promise<UiSe
       }
       try {
         await mkdir(chosen, { recursive: true });
-        const raw = JSON.parse(await readFile(loaded.configPath, "utf8")) as Record<string, unknown>;
-        raw.library = { dir: chosen };
-        await writeValidated(loaded.configPath, raw);
+        await updateConfig(loaded.configPath, (config) => {
+          config.library = { dir: chosen };
+        });
       } catch (error) {
         sendJson(res, 400, {
           error: `can't use that folder: ${error instanceof Error ? error.message : String(error)}`
@@ -573,7 +638,8 @@ function defaultRunCommand(): { command: string; args: string[] } {
 async function saveRun(
   loaded: LoadedCliConfig,
   requestId: string,
-  settings?: StartRequest["settings"]
+  settings: StartRequest["settings"] | undefined,
+  cachePath: string
 ): Promise<{ folder: string; pdf: boolean }> {
   const paths = runPathsFor(loaded, requestId);
   const result = (await readJson(paths.resultPath)) as (Record<string, unknown> & { requestId?: string }) | null;
@@ -590,23 +656,37 @@ async function saveRun(
   }
   const scoreboard = Array.isArray(result.scoreboard) ? (result.scoreboard as Array<{ participantId?: string }>) : [];
   const participants = new Set(scoreboard.map((s) => s.participantId));
-  const seats = loaded.config.agents
-    .filter((agent) => participants.has(agent.id))
-    .map((agent) => {
-      const provider = loaded.config.providers[agent.provider];
-      const cli =
-        provider?.type === "cli"
-          ? provider.cliType === "text" && provider.command
-            ? commandName(provider.command)
-            : provider.cliType
-          : provider?.type;
-      return { id: agent.id, model: settings?.[agent.id]?.model ?? agent.model, cli };
-    });
+  // Seats as they ran: this desk's launch settings, else what the library already recorded for
+  // this debate, else the seats' current settings (a debate started somewhere else).
+  const entry = settings ? undefined : (await listLibrary(libraryDir(loaded))).find((e) => e.requestId === requestId);
+  const recorded = entry ? (await readSaved(entry.folder))?.seats : undefined;
+  // Each seat keeps the name the desk shows for its model ("GPT-6-Luna"), for the saved report.
+  const labels = await cachedModelLabels(cachePath);
+  const seats = (recorded ?? seatsUsed(loaded, settings).filter((seat) => participants.has(seat.id))).map((seat) => {
+    if (seat.label || !seat.model) return seat;
+    const label = (seat.cli && labels[seat.cli]?.[seat.model]) || modelLabel(seat.model);
+    return label !== seat.model ? { ...seat, label } : seat;
+  });
   return saveToLibrary({
     dir: libraryDir(loaded),
     result,
     seats,
     attachments: await listAttachmentNames(attachmentsDirFor(paths, requestId))
+  });
+}
+
+/** Each seat's model, effort and CLI for a run: the desk's picks for it, else the seat's own settings. */
+function seatsUsed(loaded: LoadedCliConfig, settings?: StartRequest["settings"]): ReportSeat[] {
+  return loaded.config.agents.map((agent) => {
+    const provider = loaded.config.providers[agent.provider];
+    const cli =
+      provider?.type === "cli"
+        ? provider.cliType === "text" && provider.command
+          ? commandName(provider.command)
+          : provider.cliType
+        : provider?.type;
+    const effort = settings?.[agent.id]?.effort ?? agent.reasoning;
+    return { id: agent.id, model: settings?.[agent.id]?.model ?? agent.model, ...(effort ? { effort } : {}), cli };
   });
 }
 
@@ -773,26 +853,45 @@ export async function listRuns(loaded: LoadedCliConfig): Promise<RunPaths[]> {
   return runs.sort((a, b) => b.requestId.localeCompare(a.requestId));
 }
 
+// The run list is fetched every few seconds; a result or event log is parsed again only when it changes.
+const parsedCache = new Map<string, { stamp: string; value: unknown }>();
+
+async function readCached<T>(path: string, parse: (path: string) => Promise<T>): Promise<T | null> {
+  const info = await stat(path).catch(() => null);
+  if (!info) return null;
+  const stamp = `${info.mtimeMs}:${info.size}`;
+  const cached = parsedCache.get(path);
+  if (cached?.stamp === stamp) return cached.value as T;
+  const value = await parse(path);
+  parsedCache.set(path, { stamp, value });
+  return value;
+}
+
 async function summarizeRun(paths: RunPaths): Promise<Record<string, unknown>> {
-  const result = (await readJson(paths.resultPath)) as {
-    status?: string;
-    task?: { prompt?: string; title?: string };
-    metrics?: { elapsedMs?: number };
-  } | null;
-  if (result) {
-    return {
-      requestId: paths.requestId,
-      status: result.status ?? "unknown",
-      title: result.task?.title ?? null,
-      prompt: result.task?.prompt ?? null,
-      elapsedMs: result.metrics?.elapsedMs ?? null
-    };
-  }
+  const summary = await readCached(paths.resultPath, async (path) => {
+    const result = (await readJson(path)) as {
+      status?: string;
+      task?: { prompt?: string; title?: string };
+      metrics?: { elapsedMs?: number };
+    } | null;
+    return result
+      ? {
+          requestId: paths.requestId,
+          status: result.status ?? "unknown",
+          title: result.task?.title ?? null,
+          prompt: result.task?.prompt ?? null,
+          elapsedMs: result.metrics?.elapsedMs ?? null
+        }
+      : null;
+  });
+  if (summary) return summary;
 
   // No result yet: still running, failed, or abandoned.
-  const events = await readEvents(paths.jsonlPath);
-  const last = events[events.length - 1]?.event as { type?: string } | undefined;
-  const failed = (await exists(paths.errorPath)) || last?.type === "Failed";
+  const lastType = await readCached(paths.jsonlPath, async (path) => {
+    const events = await readEvents(path);
+    return (events[events.length - 1]?.event as { type?: string } | undefined)?.type ?? null;
+  });
+  const failed = (await exists(paths.errorPath)) || lastType === "Failed";
   const idleMs = await stat(paths.jsonlPath).then(
     (info) => Date.now() - info.mtimeMs,
     () => 0 // not written yet: a run that is just starting

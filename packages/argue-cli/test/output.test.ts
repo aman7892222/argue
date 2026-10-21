@@ -373,7 +373,7 @@ describe("output formatter", () => {
 
       const all = io.logs.join("\n");
       expect(all).toContain("Eliminations:");
-      expect(all).toContain("agent-c at round 2 (timeout)");
+      expect(all).toContain("agent-c at round 2 (did not answer in time)");
     });
   });
 });

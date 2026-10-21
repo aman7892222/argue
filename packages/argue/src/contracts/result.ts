@@ -170,7 +170,9 @@ export const EliminationRecordSchema = z.object({
   participantId: z.string().min(1),
   round: z.number().int().min(0),
   reason: z.enum(["timeout", "error"]),
-  at: z.string().min(1)
+  at: z.string().min(1),
+  /** What went wrong, shortened (e.g. "plan_limit: You've hit your session limit · resets 6:40pm"). */
+  error: z.string().min(1).optional()
 });
 
 export type EliminationRecord = z.infer<typeof EliminationRecordSchema>;

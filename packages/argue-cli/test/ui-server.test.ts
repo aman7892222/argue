@@ -233,6 +233,40 @@ describe("ui server", () => {
     ).toBe(401);
   });
 
+  it("remembers each seat's model and effort in the config, and forgets them with the seat", async () => {
+    const { configPath } = await makeWorkspace();
+    server = await startUiServer({ configPath });
+    const desk = async (): Promise<unknown> =>
+      (JSON.parse(await readFile(configPath, "utf8")) as { desk?: unknown }).desk;
+
+    const pick = (body: unknown): Promise<{ status: number }> =>
+      call(server!, "/api/desk/seat", { method: "POST", body });
+    expect((await pick({ id: "a1", model: "fake-2", effort: "high" })).status).toBe(200);
+    expect(((await call(server, "/api/config")).body as { picks: unknown }).picks).toEqual({
+      a1: { model: "fake-2", effort: "high" }
+    });
+    expect((await pick({ id: "nobody", model: "x" })).status).toBe(400);
+    expect((await pick({ id: "a1", effort: "HIGH; rm" })).status).toBe(400);
+    expect((await pick({ id: "a1", model: "bad\nmodel" })).status).toBe(400);
+
+    // Two quick saves both land: config writes are queued, never interleaved.
+    await Promise.all([
+      call(server, "/api/desk/theme", { method: "POST", body: { theme: "dark" } }),
+      pick({ id: "a2", effort: "low" })
+    ]);
+    expect(await desk()).toEqual({
+      theme: "dark",
+      seats: { a1: { model: "fake-2", effort: "high" }, a2: { effort: "low" } }
+    });
+
+    // Back to the seat's own model and effort: its entry goes.
+    await pick({ id: "a2", model: "", effort: "" });
+    expect(await desk()).toEqual({ theme: "dark", seats: { a1: { model: "fake-2", effort: "high" } } });
+    // Removing a seat drops what was picked for it.
+    expect((await call(server, "/api/seats/a1", { method: "DELETE" })).status).toBe(200);
+    expect(await desk()).toEqual({ theme: "dark" });
+  });
+
   it("stops when the page asks it to quit, and after going idle", async () => {
     const { configPath } = await makeWorkspace();
     const quitting = await startUiServer({ configPath });
@@ -315,5 +349,11 @@ describe("helpers", () => {
     const page = renderUiPage();
     expect(page).toContain("<!doctype html>");
     expect(page).not.toContain("innerHTML");
+    // Every inline script compiles (a stray backtick in page.ts would cut the page short).
+    const scripts = [...page.matchAll(/<script>([\s\S]*?)<\/script>/g)].map((m) => m[1]!);
+    expect(scripts.length).toBeGreaterThan(1);
+    for (const code of scripts) expect(() => new Function(code)).not.toThrow();
+    // No unthemed browser widgets: lists and dialogs are the desk's own.
+    expect(page).not.toMatch(/<select|<datalist|\b(alert|confirm|prompt)\(/);
   });
 });

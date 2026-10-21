@@ -1,13 +1,15 @@
 import { mkdir, readdir, readFile, rename, writeFile } from "node:fs/promises";
 import { homedir } from "node:os";
 import { dirname, join } from "node:path";
+import spawn from "cross-spawn";
 
 /**
  * Subscription usage for each seat, as far as each CLI reveals it:
  * - claude: every `--output-format stream-json` call reports a `rate_limit_event` with
- *   5-hour / 7-day utilization; argue records the latest one in a small ledger file.
- * - codex: Codex writes `rate_limits` (5-hour / weekly used_percent) into its own session
- *   logs under ~/.codex/sessions, so they are read directly and are always current.
+ *   5-hour / 7-day utilization; argue records the latest one in a small ledger file. Claude
+ *   Code has no way to report usage without a prompt, so this changes when Claude answers.
+ * - codex: asked live from the account (`codex app-server`, no prompt) when the desk wants it;
+ *   otherwise the newest `rate_limits` Codex wrote into its own session logs.
  * - antigravity: agy reports token counts but not its quota, so argue can only count the
  *   tokens it used itself (per local day).
  */
@@ -20,7 +22,14 @@ export type UsageWindow = {
 };
 
 export type SeatUsage =
-  | { kind: "limits"; source: "claude" | "codex"; windows: UsageWindow[]; observedAt: string | null }
+  | {
+      kind: "limits";
+      source: "claude" | "codex";
+      windows: UsageWindow[];
+      observedAt: string | null;
+      /** Read from the account just now, rather than from the CLI's last answer or log. */
+      live?: boolean;
+    }
   | {
       kind: "tokens";
       source: "antigravity";
@@ -143,6 +152,97 @@ export async function readCodexRateLimits(
 
 type CodexWindow = { used_percent: number; window_minutes?: number; resets_at?: number };
 
+type LiveWindow = { usedPercent?: unknown; windowDurationMins?: unknown; resetsAt?: unknown };
+
+/**
+ * Codex's current limits straight from the account: `codex app-server`, request
+ * `account/rateLimits/read`. That is an account read, with no prompt and no model turn, so the
+ * desk can ask every minute. Resolves null when Codex is missing, signed out or slow.
+ */
+export function readCodexLiveRateLimits(
+  options: { command?: string; env?: NodeJS.ProcessEnv; timeoutMs?: number; now?: () => Date } = {}
+): Promise<{ windows: UsageWindow[]; observedAt: string } | null> {
+  const now = options.now ?? (() => new Date());
+  return new Promise((resolve) => {
+    let child: ReturnType<typeof spawn>;
+    try {
+      child = spawn(options.command ?? "codex", ["app-server"], {
+        env: options.env ?? process.env,
+        stdio: ["pipe", "pipe", "ignore"],
+        windowsHide: true
+      });
+    } catch {
+      resolve(null);
+      return;
+    }
+    let settled = false;
+    const finish = (value: { windows: UsageWindow[]; observedAt: string } | null): void => {
+      if (settled) return;
+      settled = true;
+      clearTimeout(timer);
+      // Closing its input lets the app server exit by itself; stop it only if it lingers.
+      child.stdin?.end();
+      setTimeout(() => {
+        if (child.exitCode === null && child.signalCode === null) child.kill();
+      }, 3_000).unref();
+      resolve(value);
+    };
+    const timer = setTimeout(() => finish(null), options.timeoutMs ?? 15_000);
+    child.on("error", () => finish(null));
+    child.on("close", () => finish(null));
+    const send = (message: unknown): void => {
+      child.stdin?.write(`${JSON.stringify(message)}\n`);
+    };
+
+    let buffer = "";
+    child.stdout?.setEncoding("utf8");
+    child.stdout?.on("data", (chunk: string) => {
+      buffer += chunk;
+      for (let end = buffer.indexOf("\n"); end >= 0; end = buffer.indexOf("\n")) {
+        const line = buffer.slice(0, end).trim();
+        buffer = buffer.slice(end + 1);
+        let message: { id?: unknown; result?: { rateLimits?: { primary?: LiveWindow; secondary?: LiveWindow } } };
+        try {
+          message = JSON.parse(line) as typeof message;
+        } catch {
+          continue;
+        }
+        if (message.id === 1) {
+          send({ method: "initialized" });
+          send({ id: 2, method: "account/rateLimits/read" });
+        } else if (message.id === 2) {
+          const limits = message.result?.rateLimits;
+          const windows = [limits?.primary, limits?.secondary]
+            .filter((w): w is LiveWindow => !!w && typeof w.usedPercent === "number")
+            .map((w) => ({
+              label: formatWindow(typeof w.windowDurationMins === "number" ? w.windowDurationMins : undefined),
+              usedPercent: w.usedPercent as number,
+              resetsAt: typeof w.resetsAt === "number" ? w.resetsAt : null
+            }));
+          finish(windows.length ? { windows, observedAt: now().toISOString() } : null);
+        }
+      }
+    });
+    send({ id: 1, method: "initialize", params: { clientInfo: { name: "argue-desk", version: "1" } } });
+  });
+}
+
+// The desk asks every minute, and after each answer: one live read serves every request inside
+// that time, so Codex is asked at most about once a minute.
+const LIVE_CODEX_MAX_AGE_MS = 50_000;
+let liveCodex: { at: number; command: string; read: ReturnType<typeof readCodexLiveRateLimits> } | null = null;
+
+function liveCodexLimits(
+  command: string,
+  env: NodeJS.ProcessEnv,
+  now: Date
+): ReturnType<typeof readCodexLiveRateLimits> {
+  if (!liveCodex || liveCodex.command !== command || now.getTime() - liveCodex.at > LIVE_CODEX_MAX_AGE_MS) {
+    liveCodex = { at: now.getTime(), command, read: readCodexLiveRateLimits({ command, env }) };
+  }
+  return liveCodex.read;
+}
+
 function findRateLimits(value: unknown, depth = 0): { primary?: CodexWindow; secondary?: CodexWindow } | null {
   if (!value || typeof value !== "object" || depth > 6) return null;
   const record = value as Record<string, unknown>;
@@ -189,7 +289,12 @@ async function newestFiles(root: string, depth: number, limit: number): Promise<
 /** Usage for every cliType that has a source; a window whose reset time has passed reads as 0%. */
 export async function readSeatUsage(
   cliTypes: string[],
-  options: { env?: NodeJS.ProcessEnv; now?: Date } = {}
+  options: {
+    env?: NodeJS.ProcessEnv;
+    now?: Date;
+    /** Ask Codex's account for its current limits (the desk), with this command. */
+    liveCodex?: { command: string };
+  } = {}
 ): Promise<Record<string, SeatUsage>> {
   const env = options.env ?? process.env;
   const now = options.now ?? new Date();
@@ -207,9 +312,16 @@ export async function readSeatUsage(
           }
         : { kind: "unknown", source: "claude", reason: "Shown after the Claude seat's first call in a debate." };
     } else if (cliType === "codex") {
-      const codex = await readCodexRateLimits(env);
+      const live = options.liveCodex ? await liveCodexLimits(options.liveCodex.command, env, now) : null;
+      const codex = live ?? (await readCodexRateLimits(env));
       out.codex = codex
-        ? { kind: "limits", source: "codex", windows: rollOver(codex.windows, now), observedAt: codex.observedAt }
+        ? {
+            kind: "limits",
+            source: "codex",
+            windows: rollOver(codex.windows, now),
+            observedAt: codex.observedAt,
+            ...(live ? { live: true } : {})
+          }
         : { kind: "unknown", source: "codex", reason: "No Codex session logs with rate limits found yet." };
     } else if (cliType === "antigravity") {
       const today = localDate(now);

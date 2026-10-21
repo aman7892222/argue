@@ -5,11 +5,18 @@ import { describe, expect, it } from "vitest";
 import {
   addProviderCommand,
   detectClis,
+  effortLabel,
   findOnPath,
   formatDetectedClis,
   KNOWN_CLIS,
+  modelLabel,
   parseCodexModelCatalog,
+  parseCodexModelInfo,
+  parseTabularModelNames,
   parseTabularModels,
+  saveModelsCache,
+  withCachedListings,
+  type DetectedCli,
   type KnownCli
 } from "../src/cli-catalog.js";
 import { CLI_TYPES } from "../src/config.js";
@@ -92,6 +99,99 @@ describe("detectClis", () => {
     expect(text).toContain("--cli-type antigravity --model-id model-a --agent antigravity");
     expect(text).toContain("Missing (missing-claude): get it");
     expect(text).toContain("--cli-type text");
+  });
+});
+
+describe("model names and effort levels", () => {
+  it("reads display names from agy and descriptions from Codex", () => {
+    const agy = ["Fetching available models...", "gemini-4-argon-high\tGemini 4 Argon (High)", "lonely-id"].join("\n");
+    expect(parseTabularModelNames(agy)).toEqual({ "gemini-4-argon-high": { label: "Gemini 4 Argon (High)" } });
+
+    const codex = JSON.stringify({
+      models: [
+        {
+          slug: "gpt-6-astra",
+          display_name: "GPT-6-Astra",
+          description: "Frontier intelligence.",
+          visibility: "list",
+          supported_reasoning_levels: [{ effort: "low", description: "Fast responses" }, { effort: "ultra" }]
+        },
+        { slug: "internal", display_name: "Internal", visibility: "hide" },
+        { slug: "bare", visibility: "list" }
+      ]
+    });
+    expect(parseCodexModelInfo(codex)).toEqual({
+      "gpt-6-astra": {
+        label: "GPT-6-Astra",
+        detail: "Frontier intelligence.",
+        effortDetails: { low: "Fast responses" }
+      },
+      bare: {}
+    });
+    expect(parseCodexModelInfo("not json")).toEqual({});
+  });
+
+  it("offers every current Claude model with the effort levels it accepts", async () => {
+    const claude = KNOWN_CLIS.find((c) => c.cliType === "claude")!;
+    const [found] = await detectClis({
+      catalog: [{ ...claude, command: "missing-claude", knownPaths: [] }],
+      list: false
+    });
+    expect(found!.models.slice(0, 4)).toEqual([
+      "claude-opus-5-5",
+      "claude-sonnet-5-5",
+      "claude-haiku-5-5",
+      "claude-fable-5-1"
+    ]);
+    expect(found!.modelInfo["claude-haiku-5-5"]).toMatchObject({ label: "Haiku 5.5", group: "Latest" });
+    expect(found!.effortsByModel["claude-opus-5-5"]).toEqual(["low", "medium", "high", "xhigh", "max"]);
+    expect(found!.effortsByModel["claude-opus-4-6"]).toEqual(["low", "medium", "high", "max"]);
+    // Listed with no levels: the desk shows its effort picker disabled.
+    expect(found!.effortsByModel["claude-haiku-4-5"]).toEqual([]);
+
+    expect(modelLabel("opus")).toBe("Opus 5.5");
+    expect(modelLabel("claude-sonnet-5-5")).toBe("Sonnet 5.5");
+    expect(modelLabel("gpt-6-astra")).toBe("gpt-6-astra");
+    expect(effortLabel("xhigh")).toBe("Extra high");
+    expect(effortLabel("ultra")).toBe("Ultra");
+  });
+});
+
+describe("models cache", () => {
+  it("fills quick detections with the last listing, only for the same CLI path", async () => {
+    const dir = await mkdtemp(join(tmpdir(), "argue-models-cache-"));
+    const file = join(dir, "nested", "models-cache.json");
+    const cli: KnownCli = { cliType: "codex", command: "codex", label: "Codex", install: "n/a" };
+    const listed: DetectedCli = {
+      cli,
+      path: "/bin/codex",
+      models: ["gpt-6-astra"],
+      modelsSource: "listed",
+      efforts: [],
+      effortsByModel: { "gpt-6-astra": ["low", "ultra"] },
+      modelInfo: { "gpt-6-astra": { label: "GPT-6-Astra", effortDetails: { low: "Fast" } } }
+    };
+    await saveModelsCache(file, [listed]);
+
+    const quick: DetectedCli = { ...listed, models: [], modelsSource: "none", effortsByModel: {}, modelInfo: {} };
+    const [filled] = await withCachedListings(file, [quick]);
+    expect(filled).toMatchObject({
+      models: ["gpt-6-astra"],
+      modelsSource: "listed",
+      effortsByModel: { "gpt-6-astra": ["low", "ultra"] },
+      modelInfo: { "gpt-6-astra": { label: "GPT-6-Astra", effortDetails: { low: "Fast" } } }
+    });
+    // Moved or reinstalled elsewhere: the old listing is not trusted.
+    const moved = { ...quick, path: "/other/codex" };
+    expect((await withCachedListings(file, [moved]))[0]).toBe(moved);
+
+    // Malformed entries are ignored, a missing file changes nothing.
+    await writeFile(
+      file,
+      JSON.stringify({ version: 1, listed: { codex: { path: "/bin/codex", models: ["--yolo now"] } } })
+    );
+    expect((await withCachedListings(file, [quick]))[0]).toBe(quick);
+    expect((await withCachedListings(join(dir, "missing.json"), [quick]))[0]).toBe(quick);
   });
 });
 

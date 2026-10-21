@@ -201,7 +201,23 @@ const CliConfigSchemaBase = z
       .optional(),
     /** Debate desk look: light, dark, or "system" to follow the computer's setting (the default). */
     desk: z
-      .object({ theme: z.enum(DESK_THEMES).optional() })
+      .object({
+        theme: z.enum(DESK_THEMES).optional(),
+        /** The model and effort last picked for each seat on the desk (the seat's own model otherwise). */
+        seats: z
+          .record(
+            z
+              .object({
+                model: z.string().min(1).max(200).optional(),
+                effort: z
+                  .string()
+                  .regex(/^[a-z]{1,20}$/)
+                  .optional()
+              })
+              .strict()
+          )
+          .optional()
+      })
       .strict()
       .optional(),
     defaults: DefaultsSchema.optional(),
