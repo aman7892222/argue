@@ -73,11 +73,6 @@ export function esc(value: unknown): string {
  * lines). The text is escaped first, so only the tags added here can appear in the output.
  */
 export function mdToHtml(text: string): string {
-  const inline = (s: string): string =>
-    esc(s)
-      .replace(/`([^`]+)`/g, "<code>$1</code>")
-      .replace(/\*\*([^*]+)\*\*/g, "<b>$1</b>")
-      .replace(/(^|[\s(])\*([^*\s][^*]*)\*/g, "$1<i>$2</i>");
   const out: string[] = [];
   let list: "ul" | "ol" | null = null;
   const close = (): void => {
@@ -91,7 +86,7 @@ export function mdToHtml(text: string): string {
     const numbered = /^\s*(\d+)[.)]\s+(.*)$/.exec(line);
     if (heading) {
       close();
-      out.push(`<h3>${inline(heading[1]!)}</h3>`);
+      out.push(`<h3>${inlineMd(heading[1]!)}</h3>`);
     } else if (bullet || numbered) {
       const kind = bullet ? "ul" : "ol";
       if (list !== kind) {
@@ -100,16 +95,95 @@ export function mdToHtml(text: string): string {
         out.push(kind === "ol" ? `<ol start="${Number(numbered![1])}">` : "<ul>");
         list = kind;
       }
-      out.push(`<li>${inline(bullet ? bullet[1]! : numbered![2]!)}</li>`);
+      out.push(`<li>${inlineMd(bullet ? bullet[1]! : numbered![2]!)}</li>`);
     } else if (!line.trim()) {
       close();
     } else {
       close();
-      out.push(`<p>${inline(line)}</p>`);
+      out.push(`<p>${inlineMd(line)}</p>`);
     }
   }
   close();
   return out.join("");
+}
+
+/** Escapes, then adds bold, italics and code. `cite` may turn a claim id into a seat mark. */
+function inlineMd(s: string, cite?: (id: string) => string | null): string {
+  return esc(s)
+    .replace(
+      /`([^`]+)`|\b([A-Za-z0-9][\w.-]*:\d+:\d+)\b/g,
+      (all, code: string | undefined, bare: string | undefined) => {
+        const mark = cite?.(code ?? bare!);
+        if (mark) return mark;
+        return code !== undefined ? `<code>${code}</code>` : all;
+      }
+    )
+    .replace(/\*\*([^*]+)\*\*/g, "<b>$1</b>")
+    .replace(/(^|[\s(])\*([^*\s][^*]*)\*/g, "$1<i>$2</i>");
+}
+
+/**
+ * Takes brackets that hold only claim citations, like (`gemini:0:2`, merged `claude:0:4`), out
+ * of a line and returns the claim ids they cited.
+ */
+export function takeCitations(line: string, isClaim: (id: string) => boolean): { text: string; ids: string[] } {
+  const ids: string[] = [];
+  const text = line.replace(/\s*\(([^()]*)\)/g, (all, inner: string) => {
+    const found: string[] = [];
+    const rest = inner
+      .replace(/`?([A-Za-z0-9][\w.-]*:\d+:\d+)`?/g, (tok, id: string) => {
+        if (!isClaim(id)) return tok;
+        found.push(id);
+        return "";
+      })
+      .replace(/\b(merged|into|and|also|see|claims?|incl|including|via|from|plus)\b/gi, "");
+    if (!found.length || /[A-Za-z0-9]/.test(rest)) return all;
+    ids.push(...found);
+    return "";
+  });
+  return { text, ids };
+}
+
+export type Citations = {
+  /** The seat that first argued a claim, or null when the id is not one of this debate's claims. */
+  seatOf: (claimId: string) => string | null;
+  mark: (seat: string) => string;
+  label: (claimId: string) => string;
+};
+
+/**
+ * The representative's report with each passage marked by the seats whose claims it cites.
+ * Returns null when the report cites no claims (then plain `mdToHtml` is used).
+ */
+export function citedMdToHtml(text: string, cite: Citations): string | null {
+  const isClaim = (id: string): boolean => cite.seatOf(id) !== null;
+  const rows: string[] = [];
+  let cited = false;
+  for (const raw of String(text ?? "").split(/\r?\n/)) {
+    const line = raw.trimEnd();
+    if (!line.trim()) continue;
+    const heading = /^\s{0,3}#{1,6}\s+(.*)$/.exec(line);
+    const item = /^(\s*)([-*•]|\d+[.)])\s+(.*)$/.exec(line);
+    const { text: body, ids } = takeCitations(heading ? heading[1]! : item ? item[3]! : line.trim(), isClaim);
+    const html = inlineMd(body, (id) => {
+      if (!isClaim(id)) return null;
+      ids.push(id);
+      return `<span class="cite" title="${esc(cite.label(id))}">${cite.mark(cite.seatOf(id)!)}</span>`;
+    });
+    if (ids.length) cited = true;
+    const seats = [...new Set(ids.map((id) => cite.seatOf(id)!))];
+    const title = ids.length ? ` title="${esc([...new Set(ids)].map(cite.label).join("\n"))}"` : "";
+    const src = `<div class="src"${title}>${seats.map(cite.mark).join("")}</div>`;
+    if (heading) rows.push(`<div class="blk h">${src}<h3 class="txt">${html}</h3></div>`);
+    else if (item) {
+      const lvl = Math.min(3, Math.ceil(item[1]!.replace(/\t/g, "    ").length / 4));
+      const bullet = /\d/.test(item[2]!) ? esc(item[2]) : "•";
+      rows.push(
+        `<div class="blk">${src}<div class="txt li" style="--lvl:${lvl}" data-bullet="${bullet}">${html}</div></div>`
+      );
+    } else rows.push(`<div class="blk">${src}<p class="txt">${html}</p></div>`);
+  }
+  return cited ? `<div class="answer">${rows.join("")}</div>` : null;
 }
 
 function markHtml(theme: SeatTheme | null, fallback: string): string {
@@ -150,6 +224,36 @@ export function renderReportHtml(
   const title = result.task?.title || result.task?.prompt || "Debate";
   const participants = [...new Set((result.scoreboard ?? []).map((s) => s.participantId))];
   const resolutions = new Map((result.claimResolutions ?? []).map((r) => [r.claimId, r]));
+  // Claim ids are seat:round:index; the seat in front argued the claim first.
+  const seatOf = (claimId: string): string | null => {
+    const seat = /^([A-Za-z0-9][\w.-]*):\d+:\d+$/.exec(claimId)?.[1];
+    return seat && participants.includes(seat) ? seat : null;
+  };
+  const cite: Citations = {
+    seatOf,
+    mark: (seat) => markHtml(themeOf(seat), seat),
+    label: (claimId) => `${seatOf(claimId)}: ${claimTitles.get(claimId) || claimId}`
+  };
+  const proposers = (c: { claimId: string; proposedBy?: string[] }): string[] => {
+    const first = seatOf(c.claimId);
+    const rest = (c.proposedBy ?? []).filter((p) => p !== first);
+    return first && c.proposedBy?.includes(first) ? [first, ...rest] : rest;
+  };
+  // Which seats' answers made it in: the agreed points each seat argued first.
+  const agreed = (result.claimResolutions ?? []).filter((r) => r.status === "resolved" && seatOf(r.claimId));
+  const sources = agreed.length
+    ? `<div class="sources"><span class="sl">Agreed points, by who argued them first</span>${[...participants]
+        .map((id) => ({ id, ids: agreed.filter((r) => seatOf(r.claimId) === id).map((r) => r.claimId) }))
+        .sort((a, b) => b.ids.length - a.ids.length)
+        .map(
+          ({ id, ids }) =>
+            `<span class="chip${ids.length ? "" : " none"}" title="${esc(ids.map((c) => claimTitles.get(c) || c).join("\n"))}">${markHtml(themeOf(id), id)}${esc(id)}<small>${ids.length} of ${agreed.length}</small></span>`
+        )
+        .join("")}</div>`
+    : "";
+  const speech = result.report?.representativeSpeech
+    ? (citedMdToHtml(result.report.representativeSpeech, cite) ?? mdToHtml(result.report.representativeSpeech))
+    : "";
   const date = (options.savedAt ?? new Date()).toLocaleString("en-GB", { dateStyle: "medium", timeStyle: "short" });
   const elapsed = result.metrics?.elapsedMs ? `${Math.round(result.metrics.elapsedMs / 1000)}s` : "";
 
@@ -168,7 +272,11 @@ export function renderReportHtml(
       const tally = r
         ? `<div class="by">${r.acceptCount ?? 0} accept · ${r.rejectCount ?? 0} reject of ${r.totalVoters ?? 0}</div>`
         : "";
-      return `<tr class="${c.status === "merged" ? "merged" : ""}"><td><div class="ct">${esc(c.title)}</div><p>${esc(c.statement)}</p><div class="by">proposed by ${esc((c.proposedBy ?? []).join(", "))}</div></td><td class="tally">${verdict}${tally}</td></tr>`;
+      return `<tr class="${c.status === "merged" ? "merged" : ""}"><td><div class="ct">${esc(c.title)}</div><p>${esc(c.statement)}</p><div class="by">proposed by ${proposers(
+        c
+      )
+        .map((p) => `<span class="bys">${markHtml(themeOf(p), p)}${esc(p)}</span>`)
+        .join("")}</div></td><td class="tally">${verdict}${tally}</td></tr>`;
     })
     .join("");
 
@@ -254,6 +362,12 @@ details.round{background:#fffdf9;border:1px solid var(--line);border-radius:14px
 .toolbar{position:sticky;top:0;display:flex;gap:8px;justify-content:flex-end;padding:10px 0;background:#f6f2ea}
 .toolbar button{border:1px solid var(--line);background:#fffdf9;border-radius:9px;padding:6px 12px;font:600 13px var(--sans);cursor:pointer}
 footer{margin-top:40px;color:var(--muted);font-size:12px}
+.sources{display:flex;flex-wrap:wrap;align-items:center;gap:6px;margin-top:14px}.sl{font-size:12px;color:var(--muted);font-weight:600;margin-right:2px}.chip small{color:var(--muted);font-weight:600;margin-left:4px}.chip.none{opacity:.55}
+.bys{display:inline-flex;align-items:center;gap:4px;margin-right:9px;color:var(--ink2);font-weight:600}.bys .mark,.cite .mark{width:16px;height:16px;font-size:9px}.mark svg{width:70%;height:70%}
+.answer .blk{display:grid;grid-template-columns:70px minmax(0,1fr);column-gap:12px}.answer .src{display:flex;flex-wrap:wrap;justify-content:flex-end;align-content:flex-start;gap:3px;padding-top:5px}
+.answer .blk.h .src{padding-top:16px}
+.answer .txt{margin:4px 0;min-width:0}.answer .li{position:relative;padding-left:calc(20px + var(--lvl,0) * 20px)}.answer .li::before{content:attr(data-bullet);position:absolute;left:calc(var(--lvl,0) * 20px);color:var(--muted)}
+.cite{display:inline-flex;vertical-align:-3px;margin:0 2px}
 .md{font:400 15.5px/1.65 var(--serif);color:var(--ink2)}.md h3{font:600 16px/1.35 var(--serif);color:var(--ink);margin:14px 0 4px}.md p{margin:6px 0}.md ul,.md ol{margin:6px 0;padding-left:22px}.md li{margin:3px 0}.md code{font:12.5px Consolas,monospace;background:var(--soft);padding:1px 5px;border-radius:5px}
 @media print{body{background:#fff}.toolbar{display:none}.card,.score,details.round{break-inside:avoid}main{padding:0 6px}}
 </style></head><body><main>
@@ -264,8 +378,8 @@ ${result.task?.title && result.task.prompt && result.task.prompt !== result.task
 <p class="meta">${esc(date)}${elapsed ? ` · ${esc(elapsed)}` : ""}${result.metrics?.totalRounds ? ` · ${result.metrics.totalRounds} rounds` : ""}</p>
 ${attachments}
 <h2>Verdict</h2>
-<div class="card verdict ${esc(result.status)}"><p class="meta">Written by <b>${esc(result.representative?.participantId)}</b>, the top peer score</p>${result.report?.finalSummary ? `<p class="big">${esc(result.report.finalSummary)}</p>` : ""}</div>
-${result.report?.representativeSpeech ? `<h2>Full report</h2><div class="card md">${mdToHtml(result.report.representativeSpeech)}</div>` : ""}
+<div class="card verdict ${esc(result.status)}"><p class="meta">Written by <b>${esc(result.representative?.participantId)}</b>, the top peer score</p>${result.report?.finalSummary ? `<p class="big">${esc(result.report.finalSummary)}</p>` : ""}${sources}</div>
+${speech ? `<h2>Full report</h2><div class="card md">${speech}</div>` : ""}
 ${claimsRows ? `<h2>Claims and how they were resolved</h2><div class="card" style="padding:0"><table>${claimsRows}</table></div>` : ""}
 ${scores ? `<h2>Peer scores</h2><div class="scores">${scores}</div>` : ""}
 ${rounds ? `<h2>How they got there</h2>${rounds}` : options.reasoning ? "" : `<p class="meta" style="margin-top:28px">The round-by-round reasoning is in report.html next to this file.</p>`}

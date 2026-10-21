@@ -26,6 +26,8 @@ export interface KnownCli {
   efforts?: string[];
   /** Per-model effort levels parsed from the model listing (overrides `efforts`). */
   parseEfforts?: (stdout: string) => Record<string, string[]>;
+  /** Effort is part of the model id (gemini-4-argon-high), so the desk shows it as model + effort. */
+  effortInModelName?: boolean;
   /** Short warnings shown next to specific models. */
   modelNotes?: Record<string, string>;
   /** Shown when the CLI cannot list models (where to find valid ids). */
@@ -65,6 +67,7 @@ export const KNOWN_CLIS: KnownCli[] = [
     label: "Google Antigravity",
     listModelsArgs: ["models"],
     parseModels: parseTabularModels,
+    effortInModelName: true,
     knownPaths: ["{localappdata}/agy/bin/agy.exe", "{home}/.local/bin/agy"],
     install:
       "winget install Google.AntigravityCLI  (macOS/Linux: curl -fsSL https://antigravity.google/cli/install.sh | bash)"

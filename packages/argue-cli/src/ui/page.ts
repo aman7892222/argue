@@ -3,11 +3,16 @@
 // deliberately avoids backticks and dollar-brace so nothing is interpolated by this module.
 // All model-generated text is inserted with textContent, never innerHTML.
 
+import { DESK_THEMES, type DeskTheme } from "../config.js";
 import { SEAT_THEMES } from "./themes.js";
 
-export function renderUiPage(): string {
+export function renderUiPage(options: { theme?: DeskTheme } = {}): string {
   // Theme data is our own constant; "<" is still escaped so it can never close the script tag.
-  return PAGE.replace("/*SEAT_THEMES*/[]", JSON.stringify(SEAT_THEMES).replace(/</g, "\\u003c"));
+  const theme = DESK_THEMES.find((t) => t === options.theme) ?? "system";
+  return PAGE.replace("/*SEAT_THEMES*/[]", JSON.stringify(SEAT_THEMES).replace(/</g, "\\u003c")).replace(
+    '/*DESK_THEME*/"system"',
+    JSON.stringify(theme)
+  );
 }
 
 const PAGE = String.raw`<!doctype html>
@@ -16,6 +21,16 @@ const PAGE = String.raw`<!doctype html>
 <meta charset="utf-8">
 <meta name="viewport" content="width=device-width, initial-scale=1">
 <title>argue · debate desk</title>
+<script>
+// The saved theme (workspace config, filled in by the server), applied before the first paint so a
+// dark page never flashes light. "system" follows this computer's setting.
+(function () {
+  var pref = /*DESK_THEME*/"system";
+  var dark = pref === "dark" || (pref !== "light" && !!window.matchMedia && matchMedia("(prefers-color-scheme: dark)").matches);
+  document.documentElement.setAttribute("data-theme-pref", pref);
+  document.documentElement.setAttribute("data-theme", dark ? "dark" : "light");
+})();
+</script>
 <link rel="icon" href="data:image/svg+xml,%3Csvg xmlns='http://www.w3.org/2000/svg' viewBox='0 0 32 32'%3E%3Ccircle cx='16' cy='16' r='13' fill='none' stroke='%23D97757' stroke-width='4' stroke-dasharray='27 100'/%3E%3Ccircle cx='16' cy='16' r='13' fill='none' stroke='%231f1f1f' stroke-width='4' stroke-dasharray='27 100' stroke-dashoffset='-27.2'/%3E%3Ccircle cx='16' cy='16' r='13' fill='none' stroke='%239B72CB' stroke-width='4' stroke-dasharray='27 100' stroke-dashoffset='-54.4'/%3E%3C/svg%3E">
 <style>
 :root {
@@ -31,15 +46,38 @@ const PAGE = String.raw`<!doctype html>
   --codex: #1f1f1f; --codex-soft: #e9e8e6;
   --gemini: #7b6fd8; --gemini-soft: #ecebfb;
   --gemini-g: linear-gradient(100deg, #4285F4 0%, #9B72CB 55%, #D96570 100%);
+  --field: #fff; --field2: #fdfbf7; --claim-bg: #fffcf7; --hover: #fffaf2; --bubble: #ece5d8;
+  --line-strong: #d5cab6; --dash: #d8cdb9; --placeholder: #a39a8d; --em: #8a5a3c; --on-ink: #fff;
+  --glow: #fbf7f0; --aside-bg: rgba(250, 246, 239, .82); --scrim: rgba(30, 24, 16, .32); --ring: rgba(201, 185, 158, .3);
+  --shadow-lg: 0 2px 4px rgba(40, 30, 10, .04), 0 18px 48px rgba(40, 30, 10, .08);
+  --shadow-xl: 0 2px 4px rgba(40, 30, 10, .05), 0 22px 56px rgba(40, 30, 10, .11);
+  --shadow-pop: 0 10px 34px rgba(40, 30, 10, .16);
+  color-scheme: light;
+}
+/* Dark theme: set on <html> by the theme switch (Light / Dark / Default = follow the system). */
+:root[data-theme="dark"] {
+  --bg: #181613; --bg2: #1f1c18; --panel: #221f1b; --ink: #ece7df; --ink2: #d0c9be; --muted: #9a9286; --line: #35302a;
+  --soft: #2b2722; --accent: #ece7df; --focus: #8a7a60;
+  --agree: #72c491; --agree-bg: #1d3125; --disagree: #f08b81; --disagree-bg: #3b211f;
+  --revise: #e2a752; --revise-bg: #372a17; --live: #93a6ff; --live-bg: #222947;
+  --shadow: 0 1px 1px rgba(0, 0, 0, .25), 0 6px 22px rgba(0, 0, 0, .28);
+  --field: #1c1a16; --field2: #1f1c19; --claim-bg: #26221e; --hover: #28241f; --bubble: #312c25;
+  --line-strong: #4b443a; --dash: #4b443a; --placeholder: #70695f; --em: #d79c72; --on-ink: #181613;
+  --glow: #221e1a; --aside-bg: rgba(29, 26, 22, .88); --scrim: rgba(0, 0, 0, .55); --ring: rgba(138, 122, 96, .35);
+  --shadow-lg: 0 2px 4px rgba(0, 0, 0, .2), 0 18px 48px rgba(0, 0, 0, .35);
+  --shadow-xl: 0 2px 4px rgba(0, 0, 0, .25), 0 22px 56px rgba(0, 0, 0, .45);
+  --shadow-pop: 0 10px 34px rgba(0, 0, 0, .5);
+  color-scheme: dark;
 }
 * { box-sizing: border-box; }
+[hidden] { display: none !important; }
 html, body { margin: 0; background: var(--bg); color: var(--ink); font: 15px/1.6 var(--sans); }
-body { background: radial-gradient(1200px 600px at 85% -10%, #fbf7f0 0%, transparent 60%), var(--bg); min-height: 100vh; }
+body { background: radial-gradient(1200px 600px at 85% -10%, var(--glow) 0%, transparent 60%), var(--bg); min-height: 100vh; }
 button, input, select, textarea { font: inherit; color: inherit; }
 button { cursor: pointer; }
 :focus-visible { outline: 2px solid var(--focus); outline-offset: 2px; }
 .app { display: grid; grid-template-columns: 352px 1fr; min-height: 100vh; }
-aside { border-right: 1px solid var(--line); background: rgba(255, 252, 246, .7); backdrop-filter: blur(6px); padding: 22px 20px 18px;
+aside { border-right: 1px solid var(--line); background: var(--aside-bg); backdrop-filter: blur(6px); padding: 22px 20px 18px;
   position: sticky; top: 0; height: 100vh; overflow-y: auto; display: flex; flex-direction: column; }
 main { padding: 34px 44px 90px; min-width: 0; max-width: 1180px; }
 
@@ -65,7 +103,7 @@ main { padding: 34px 44px 90px; min-width: 0; max-width: 1180px; }
 .pod .num small { font-weight: 500; color: var(--muted); font-size: 11px; }
 .pod .who { font-size: 11.5px; color: var(--muted); max-width: 96px; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
 .pod .tip { display: none; position: absolute; top: calc(100% - 2px); left: 50%; transform: translateX(-50%); z-index: 30; width: 268px; padding: 12px 14px;
-  background: var(--panel); border: 1px solid var(--line); border-radius: 12px; box-shadow: 0 10px 34px rgba(40, 30, 10, .16); font-size: 12.5px; line-height: 1.55; text-align: left; }
+  background: var(--panel); border: 1px solid var(--line); border-radius: 12px; box-shadow: var(--shadow-pop); font-size: 12.5px; line-height: 1.55; text-align: left; }
 .pod:first-child .tip { left: 0; transform: none; }
 .pod:last-child .tip { left: auto; right: 0; transform: none; }
 .pod:hover .tip { display: block; }
@@ -82,32 +120,37 @@ main { padding: 34px 44px 90px; min-width: 0; max-width: 1180px; }
 .form { padding: 16px; display: grid; gap: 13px; }
 label.field, .field { display: grid; gap: 6px; font-size: 12.5px; color: var(--muted); font-weight: 650; }
 .field .hint { font-weight: 400; }
-textarea, select, input[type=text] { width: 100%; border: 1px solid var(--line); border-radius: 10px; padding: 9px 11px; background: #fff; font-weight: 400; color: var(--ink); }
+textarea, select, input[type=text] { width: 100%; border: 1px solid var(--line); border-radius: 10px; padding: 9px 11px; background: var(--field); font-weight: 400; color: var(--ink); }
 textarea { min-height: 92px; resize: vertical; line-height: 1.5; }
-textarea:focus, select:focus, input[type=text]:focus { outline: none; border-color: var(--focus); box-shadow: 0 0 0 3px rgba(201, 185, 158, .3); }
+textarea:focus, select:focus, input[type=text]:focus { outline: none; border-color: var(--focus); box-shadow: 0 0 0 3px var(--ring); }
 .seats { display: grid; gap: 6px; }
 .seat-opt { position: relative; display: grid; gap: 7px; padding: 9px 10px; border: 1px solid var(--line); border-radius: 12px;
-  color: var(--ink); font-weight: 600; background: #fff; transition: border-color .15s; }
-.seat-opt:hover { border-color: #d5cab6; }
+  color: var(--ink); font-weight: 600; background: var(--field); transition: border-color .15s; }
+.seat-opt:hover { border-color: var(--line-strong); }
 .seat-main { display: flex; align-items: center; gap: 10px; cursor: pointer; padding-right: 26px; }
 .seat-main input { accent-color: var(--ink); margin: 0; }
-.seat-pick { display: grid; grid-template-columns: minmax(0, 1fr) minmax(0, 1fr); gap: 6px; }
-.seat-pick select.pick { padding: 4px 7px; font-size: 12px; border-radius: 8px; color: var(--ink2); background: #fdfbf7; min-width: 0; }
-.seat-pick:has(select.pick[style*="none"]) select.pick:first-child { grid-column: 1 / -1; }
+/* Every seat gets the same pair: model, then effort (always shown, "default" until picked). */
+.seat-pick { display: grid; grid-template-columns: minmax(0, 1.25fr) minmax(0, 1fr); gap: 6px; }
+.seat-pick select.pick { appearance: none; -webkit-appearance: none; height: 30px; padding: 0 26px 0 10px; font-size: 12px; font-weight: 550; border-radius: 8px;
+  color: var(--ink2); background: var(--field2) no-repeat right 9px center / 9px 6px; min-width: 0; text-overflow: ellipsis; cursor: pointer;
+  background-image: url("data:image/svg+xml,%3Csvg xmlns='http://www.w3.org/2000/svg' viewBox='0 0 9 6'%3E%3Cpath d='M.8.8 4.5 4.6 8.2.8' fill='none' stroke='%23948b7f' stroke-width='1.4' stroke-linecap='round' stroke-linejoin='round'/%3E%3C/svg%3E"); }
+.seat-pick select.pick:hover:not(:disabled) { border-color: var(--line-strong); }
+.seat-pick select.pick:disabled { cursor: default; opacity: .6; }
 .seat-opt .rm { display: none; position: absolute; right: 6px; top: 7px; border: 0; background: var(--panel); color: var(--muted);
   width: 24px; height: 24px; border-radius: 7px; font-size: 15px; line-height: 1; }
 .seat-opt:hover .rm, .seat-opt:focus-within .rm { display: block; }
 .seat-opt .rm:hover { color: var(--disagree); background: var(--disagree-bg); }
 .mark { width: 20px; height: 20px; border-radius: 50%; display: inline-grid; place-items: center; font-size: 11px; font-weight: 700; flex: none; }
-.link-btn { border: 1px dashed #d8cdb9; background: transparent; border-radius: 11px; padding: 8px 10px; color: var(--ink2); font-weight: 600; font-size: 13px; text-align: left; }
-.link-btn:hover { background: #fff; border-style: solid; }
+:root[data-theme="dark"] .mark { box-shadow: 0 0 0 1px rgba(255, 255, 255, .08); }
+.link-btn { border: 1px dashed var(--dash); background: transparent; border-radius: 11px; padding: 8px 10px; color: var(--ink2); font-weight: 600; font-size: 13px; text-align: left; }
+.link-btn:hover { background: var(--field); border-style: solid; }
 .row2 { display: grid; grid-template-columns: 1fr 1fr; gap: 10px; }
-.btn { border: 0; border-radius: 11px; padding: 11px 16px; font-weight: 650; background: var(--ink); color: #fff; letter-spacing: .01em; transition: transform .1s, opacity .15s; }
+.btn { border: 0; border-radius: 11px; padding: 11px 16px; font-weight: 650; background: var(--ink); color: var(--on-ink); letter-spacing: .01em; transition: transform .1s, opacity .15s; }
 .btn:hover { opacity: .92; }
 .btn:active { transform: translateY(1px); }
 .btn:disabled { opacity: .5; cursor: default; }
 .btn.ghost { background: transparent; color: var(--ink); border: 1px solid var(--line); font-weight: 600; padding: 7px 12px; }
-.btn.ghost:hover { background: #fff; }
+.btn.ghost:hover { background: var(--field); }
 .btn.small { padding: 5px 11px; font-size: 12.5px; }
 .btn.danger { background: var(--disagree-bg); color: var(--disagree); }
 .hint { font-size: 12px; color: var(--muted); margin: 0; line-height: 1.5; }
@@ -115,7 +158,7 @@ textarea:focus, select:focus, input[type=text]:focus { outline: none; border-col
 .runs { display: grid; gap: 6px; }
 .run-item { text-align: left; border: 1px solid transparent; border-radius: 12px; padding: 9px 11px; background: transparent; display: grid; gap: 3px; }
 .run-item:hover { background: var(--panel); border-color: var(--line); }
-.run-item.active { background: var(--panel); border-color: #d5cab6; box-shadow: var(--shadow); }
+.run-item.active { background: var(--panel); border-color: var(--line-strong); box-shadow: var(--shadow); }
 .run-item .t { font-weight: 600; font-size: 13.5px; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
 .run-item .m { display: flex; gap: 8px; align-items: center; font-size: 11.5px; color: var(--muted); }
 .side-foot { margin-top: auto; padding-top: 18px; display: flex; align-items: center; gap: 8px; }
@@ -128,7 +171,7 @@ textarea:focus, select:focus, input[type=text]:focus { outline: none; border-col
 .file-chip button { border: 0; background: transparent; color: var(--muted); width: 20px; height: 20px; border-radius: 50%; }
 .file-chip button:hover { background: var(--disagree-bg); color: var(--disagree); }
 .library { padding: 12px 14px; display: grid; gap: 8px; }
-.lib-path { font-family: var(--mono); font-size: 11.5px; color: var(--ink2); word-break: break-all; background: #fdfbf7; border: 1px solid var(--line); border-radius: 8px; padding: 6px 8px; }
+.lib-path { font-family: var(--mono); font-size: 11.5px; color: var(--ink2); word-break: break-all; background: var(--field2); border: 1px solid var(--line); border-radius: 8px; padding: 6px 8px; }
 .lib-actions, .run-actions { display: flex; flex-wrap: wrap; gap: 6px; }
 .run-actions .btn.small { display: inline-flex; align-items: center; gap: 5px; }
 .attached { font-size: 12.5px; color: var(--muted); }
@@ -168,6 +211,31 @@ details.more > summary::before { content: "+ "; color: var(--muted); }
 details.more[open] > summary::before { content: "− "; }
 .prose { white-space: pre-wrap; margin: 10px 0 0; }
 .verdict .prose { font: 400 16px/1.65 var(--serif); color: var(--ink2); }
+.mark svg { width: 70%; height: 70%; }
+/* who argued what: seat marks beside each passage of the report, and in the claims table */
+.sources { display: flex; flex-wrap: wrap; align-items: center; gap: 6px; margin-top: 16px; }
+.sources-label { font-size: 12px; color: var(--muted); font-weight: 600; margin-right: 2px; }
+.sources .chip { cursor: default; }
+.sources .chip small { color: var(--muted); font-weight: 600; margin-left: 1px; }
+.sources .chip.none { opacity: .55; }
+.answer { margin-top: 10px; font: 400 16px/1.65 var(--serif); color: var(--ink2); }
+.answer > .hint { font-family: var(--sans); margin: 0 0 8px; }
+.answer .blk { display: grid; grid-template-columns: minmax(0, 1fr); }
+.answer.cited .blk { grid-template-columns: 70px minmax(0, 1fr); column-gap: 12px; }
+.answer .src { display: flex; flex-wrap: wrap; justify-content: flex-end; align-content: flex-start; gap: 3px; padding-top: 5px; }
+.answer .src .mark { width: 20px; height: 20px; font-size: 11px; }
+.answer .blk.h .src { padding-top: 18px; }
+.answer .txt { margin: 4px 0; min-width: 0; }
+.answer h4.txt { font: 600 17px/1.35 var(--serif); color: var(--ink); margin: 16px 0 2px; }
+.answer .txt b { color: var(--ink); }
+.answer .li { position: relative; padding-left: calc(20px + var(--lvl, 0) * 20px); }
+.answer .li::before { content: attr(data-bullet); position: absolute; left: calc(var(--lvl, 0) * 20px); color: var(--muted); font-variant-numeric: tabular-nums; }
+.answer code { font: 12.5px var(--mono); background: var(--soft); padding: 1px 5px; border-radius: 5px; }
+.cite { display: inline-flex; vertical-align: -3px; margin: 0 2px; }
+.cite .mark { width: 16px; height: 16px; font-size: 9px; }
+.by-seat { display: inline-flex; align-items: center; gap: 4px; margin-right: 9px; color: var(--ink2); font-weight: 600; }
+.by-seat .mark { width: 16px; height: 16px; font-size: 9px; }
+@media (max-width: 600px) { .answer.cited .blk { grid-template-columns: 43px minmax(0, 1fr); column-gap: 8px; } }
 
 /* rounds */
 details.round { margin-bottom: 10px; }
@@ -175,7 +243,7 @@ details.round > summary { color: var(--ink); font-weight: 400; font-size: 14px; 
   align-items: center; gap: 6px 12px; border-radius: 16px; }
 details.round > summary::before { content: "›"; color: var(--muted); font-size: 18px; line-height: 1; transition: transform .2s; display: inline-block; width: 10px; }
 details.round[open] > summary::before { transform: rotate(90deg); }
-details.round > summary:hover { background: #fffaf2; }
+details.round > summary:hover { background: var(--hover); }
 details.round[open] > summary { border-bottom: 1px solid var(--line); border-radius: 16px 16px 0 0; }
 details.round > .lanes, details.round > .note { margin: 14px 16px; }
 details.round > .note:last-child { margin-bottom: 16px; }
@@ -200,7 +268,7 @@ details.round > .note:last-child { margin-bottom: 16px; }
 .lane-head .pill { margin-left: auto; }
 .summary { font-weight: 600; margin: 0 0 10px; color: var(--ink2); }
 .block-label { font-size: 10.5px; text-transform: uppercase; letter-spacing: .1em; color: var(--muted); font-weight: 750; margin: 14px 0 7px; }
-.claim { border: 1px solid var(--line); border-radius: 11px; padding: 9px 11px; margin-bottom: 7px; background: #fffcf7; }
+.claim { border: 1px solid var(--line); border-radius: 11px; padding: 9px 11px; margin-bottom: 7px; background: var(--claim-bg); }
 .claim .id { font-family: var(--mono); font-size: 11px; color: var(--muted); }
 .claim .title { font-weight: 650; }
 .claim p { margin: 3px 0 0; font-size: 14px; color: var(--ink2); }
@@ -243,12 +311,12 @@ details.round > .note:last-child { margin-bottom: 16px; }
 .score-total .crown { margin-left: auto; font-size: 11px; color: var(--muted); font-weight: 650; }
 
 /* modal + overlays */
-.scrim { position: fixed; inset: 0; background: rgba(30, 24, 16, .32); backdrop-filter: blur(3px); display: grid; place-items: center; z-index: 50; padding: 16px; }
+.scrim { position: fixed; inset: 0; background: var(--scrim); backdrop-filter: blur(3px); display: grid; place-items: center; z-index: 50; padding: 16px; }
 .modal { width: min(560px, 100%); max-height: calc(100vh - 32px); overflow-y: auto; padding: 22px 24px; }
 .modal h2 { font: 600 22px/1.3 var(--serif); margin: 0 0 4px; }
 .cli-list { display: grid; gap: 7px; margin: 14px 0; }
-.cli-opt { display: flex; align-items: center; gap: 10px; padding: 10px 12px; border: 1px solid var(--line); border-radius: 12px; background: #fff; text-align: left; cursor: pointer; }
-.cli-opt:hover { border-color: #d5cab6; }
+.cli-opt { display: flex; align-items: center; gap: 10px; padding: 10px 12px; border: 1px solid var(--line); border-radius: 12px; background: var(--field); text-align: left; cursor: pointer; }
+.cli-opt:hover { border-color: var(--line-strong); }
 .cli-opt.sel { border-color: var(--ink); box-shadow: 0 0 0 1px var(--ink); }
 .cli-opt small { color: var(--muted); display: block; font-size: 11.5px; }
 .cli-opt .pick { margin-left: auto; }
@@ -266,12 +334,12 @@ details.round > .note:last-child { margin-bottom: 16px; }
 
 /* ---------- app layout: chat-style sidebar + centred main ---------- */
 .app { grid-template-columns: 284px 1fr; }
-aside.sidebar { padding: 18px 14px 14px; gap: 0; background: rgba(250, 246, 239, .82); }
+aside.sidebar { padding: 18px 14px 14px; gap: 0; background: var(--aside-bg); }
 .sidebar .brand { padding: 2px 8px 14px; margin: 0; }
 .new-btn { display: flex; align-items: center; gap: 9px; width: 100%; padding: 10px 12px; border: 1px solid var(--line); border-radius: 12px;
   background: var(--panel); color: var(--ink); font-weight: 650; font-size: 14px; box-shadow: var(--shadow); transition: border-color .15s, transform .1s; }
 .new-btn span { font-size: 16px; line-height: 1; color: var(--muted); }
-.new-btn:hover { border-color: #d5cab6; }
+.new-btn:hover { border-color: var(--line-strong); }
 .new-btn:active { transform: translateY(1px); }
 .new-btn.active { border-color: var(--ink); }
 .history { flex: 1; overflow-y: auto; margin: 14px -4px 10px; padding: 0 4px; min-height: 120px; }
@@ -295,6 +363,15 @@ details.library > summary .eyebrow { margin: 0; }
 details.library[open] { background: var(--panel); border: 1px solid var(--line); padding: 8px 10px 10px; display: grid; gap: 8px; }
 .lib-short { font-size: 11.5px; color: var(--muted); overflow: hidden; text-overflow: ellipsis; white-space: nowrap; min-width: 0; flex: 1; text-align: right; }
 .side-foot { margin-top: 2px; padding: 4px 6px 0; }
+.arc-ink { stroke: var(--ink); }
+.theme-row { display: flex; align-items: center; gap: 8px; padding: 2px 6px; }
+.theme-row .eyebrow { margin: 0; flex: 1; }
+.seg { display: inline-flex; padding: 2px; gap: 2px; border: 1px solid var(--line); border-radius: 10px; background: var(--soft); }
+.seg button { display: inline-flex; align-items: center; gap: 5px; border: 0; background: transparent; color: var(--muted); border-radius: 8px;
+  padding: 4px 8px; font-size: 12px; font-weight: 600; }
+.seg button svg { width: 13px; height: 13px; flex: none; }
+.seg button:hover { color: var(--ink); }
+.seg button[aria-checked="true"] { background: var(--panel); color: var(--ink); box-shadow: var(--shadow); }
 
 main { max-width: none; padding: 0 40px 90px; display: flex; flex-direction: column; align-items: center; }
 #banner-slot { width: 100%; max-width: 880px; padding-top: 18px; }
@@ -306,20 +383,19 @@ main { max-width: none; padding: 0 40px 90px; display: flex; flex-direction: col
 .hero { text-align: center; margin-bottom: 26px; }
 .hero-mark { width: 46px; height: 46px; margin-bottom: 14px; }
 .hero-title { font: 500 46px/1.08 var(--serif); letter-spacing: -.022em; margin: 0; color: var(--ink); text-wrap: balance; }
-.hero-title em { font-style: italic; color: #8a5a3c; }
-.hero-sub { margin: 14px auto 0; max-width: 520px; color: var(--muted); font-size: 15.5px; line-height: 1.55; text-wrap: balance; }
-.composer { background: var(--panel); border: 1px solid var(--line); border-radius: 22px; box-shadow: 0 2px 4px rgba(40, 30, 10, .04), 0 18px 48px rgba(40, 30, 10, .08);
+.hero-title em { font-style: italic; color: var(--em); }
+.composer { background: var(--panel); border: 1px solid var(--line); border-radius: 22px; box-shadow: var(--shadow-lg);
   padding: 16px 16px 12px; transition: border-color .2s, box-shadow .2s; }
-.composer:focus-within { border-color: #d3c6af; box-shadow: 0 2px 4px rgba(40, 30, 10, .05), 0 22px 56px rgba(40, 30, 10, .11); }
+.composer:focus-within { border-color: var(--line-strong); box-shadow: var(--shadow-xl); }
 .composer textarea { border: 0; background: transparent; padding: 6px 8px; min-height: 84px; max-height: 340px; font: 400 18px/1.55 var(--serif); color: var(--ink); resize: none; }
-.composer textarea::placeholder { color: #a39a8d; font-style: italic; }
+.composer textarea::placeholder { color: var(--placeholder); font-style: italic; }
 .composer textarea:focus { box-shadow: none; outline: none; }
 .composer .attach-list { padding: 4px 8px 6px; }
 .composer-bar { display: flex; align-items: center; gap: 8px; padding-top: 10px; border-top: 1px solid var(--soft); flex-wrap: wrap; }
-.tool-btn { display: inline-flex; align-items: center; gap: 6px; border: 1px solid var(--line); background: #fff; color: var(--ink2); border-radius: 999px;
+.tool-btn { display: inline-flex; align-items: center; gap: 6px; border: 1px solid var(--line); background: var(--field); color: var(--ink2); border-radius: 999px;
   padding: 6px 12px; font-size: 13px; font-weight: 600; }
-.tool-btn:hover { border-color: #d5cab6; }
-.tool-select { display: inline-flex; align-items: center; gap: 6px; border: 1px solid var(--line); background: #fff; border-radius: 999px; padding: 2px 4px 2px 12px;
+.tool-btn:hover { border-color: var(--line-strong); }
+.tool-select { display: inline-flex; align-items: center; gap: 6px; border: 1px solid var(--line); background: var(--field); border-radius: 999px; padding: 2px 4px 2px 12px;
   font-size: 12.5px; color: var(--muted); font-weight: 600; }
 .tool-select select { border: 0; padding: 4px 4px; background: transparent; font-size: 13px; font-weight: 650; color: var(--ink); width: auto; }
 .tool-select select:focus { box-shadow: none; }
@@ -335,11 +411,11 @@ main { max-width: none; padding: 0 40px 90px; display: flex; flex-direction: col
 .composer-view .seat-opt { background: var(--panel); }
 .examples { display: flex; flex-wrap: wrap; justify-content: center; gap: 8px; margin-top: 26px; }
 .example { border: 1px solid var(--line); background: transparent; border-radius: 999px; padding: 7px 14px; font-size: 13px; color: var(--ink2); }
-.example:hover { background: var(--panel); border-color: #d5cab6; }
+.example:hover { background: var(--panel); border-color: var(--line-strong); }
 
 /* ---------- an open debate: the question, then the answer ---------- */
 .question { display: flex; justify-content: flex-end; margin: 4px 0 18px; }
-.question .bubble { max-width: 78%; background: #ece5d8; color: var(--ink); border-radius: 20px 20px 6px 20px; padding: 12px 16px; font-size: 15px; line-height: 1.55; white-space: pre-wrap; }
+.question .bubble { max-width: 78%; background: var(--bubble); color: var(--ink); border-radius: 20px 20px 6px 20px; padding: 12px 16px; font-size: 15px; line-height: 1.55; white-space: pre-wrap; }
 .question .bubble small { display: block; color: var(--muted); font-size: 11px; text-transform: uppercase; letter-spacing: .1em; font-weight: 700; margin-bottom: 4px; }
 .run-view .head { margin-bottom: 22px; }
 
@@ -357,7 +433,7 @@ main { max-width: none; padding: 0 40px 90px; display: flex; flex-direction: col
 <div class="app">
   <aside class="sidebar">
     <div class="brand">
-      <svg viewBox="0 0 32 32" aria-hidden="true"><circle cx="16" cy="16" r="12" fill="none" stroke="#D97757" stroke-width="4" stroke-dasharray="24 100"/><circle cx="16" cy="16" r="12" fill="none" stroke="#1f1f1f" stroke-width="4" stroke-dasharray="24 100" stroke-dashoffset="-25.1"/><circle cx="16" cy="16" r="12" fill="none" stroke="#9B72CB" stroke-width="4" stroke-dasharray="24 100" stroke-dashoffset="-50.2"/></svg>
+      <svg viewBox="0 0 32 32" aria-hidden="true"><circle cx="16" cy="16" r="12" fill="none" stroke="#D97757" stroke-width="4" stroke-dasharray="24 100"/><circle cx="16" cy="16" r="12" fill="none" class="arc-ink" stroke-width="4" stroke-dasharray="24 100" stroke-dashoffset="-25.1"/><circle cx="16" cy="16" r="12" fill="none" stroke="#9B72CB" stroke-width="4" stroke-dasharray="24 100" stroke-dashoffset="-50.2"/></svg>
       <b>argue</b><span>debate desk</span>
     </div>
     <button class="new-btn" id="new-debate" type="button"><span aria-hidden="true">＋</span> New debate</button>
@@ -376,6 +452,14 @@ main { max-width: none; padding: 0 40px 90px; display: flex; flex-direction: col
           <button class="btn ghost small" id="lib-open" type="button">Open folder</button>
         </div>
       </details>
+      <div class="theme-row">
+        <span class="eyebrow">Theme</span>
+        <div class="seg" id="theme-switch" role="radiogroup" aria-label="Theme">
+          <button type="button" role="radio" data-theme-pick="light" title="Light"><svg viewBox="0 0 16 16" aria-hidden="true"><circle cx="8" cy="8" r="3" fill="none" stroke="currentColor" stroke-width="1.5"/><path d="M8 1.2v1.6M8 13.2v1.6M1.2 8h1.6M13.2 8h1.6M3.2 3.2l1.1 1.1M11.7 11.7l1.1 1.1M3.2 12.8l1.1-1.1M11.7 4.3l1.1-1.1" stroke="currentColor" stroke-width="1.5" stroke-linecap="round"/></svg>Light</button>
+          <button type="button" role="radio" data-theme-pick="dark" title="Dark"><svg viewBox="0 0 16 16" aria-hidden="true"><path d="M13.6 10.1A6 6 0 0 1 5.9 2.4a6 6 0 1 0 7.7 7.7Z" fill="none" stroke="currentColor" stroke-width="1.5" stroke-linejoin="round"/></svg>Dark</button>
+          <button type="button" role="radio" data-theme-pick="system" title="Default: follow this computer's light or dark setting"><svg viewBox="0 0 16 16" aria-hidden="true"><circle cx="8" cy="8" r="6.2" fill="none" stroke="currentColor" stroke-width="1.5"/><path d="M8 1.8a6.2 6.2 0 0 1 0 12.4Z" fill="currentColor"/></svg>Default</button>
+        </div>
+      </div>
       <div class="side-foot">
         <p class="hint">Runs only on this computer.</p>
         <button class="btn ghost small" id="quit" type="button">Quit</button>
@@ -388,9 +472,8 @@ main { max-width: none; padding: 0 40px 90px; display: flex; flex-direction: col
 
     <section class="composer-view" id="composer-view">
       <div class="hero">
-        <svg class="hero-mark" viewBox="0 0 32 32" aria-hidden="true"><circle cx="16" cy="16" r="12" fill="none" stroke="#D97757" stroke-width="2.6" stroke-dasharray="24 100" stroke-linecap="round"/><circle cx="16" cy="16" r="12" fill="none" stroke="#1f1f1f" stroke-width="2.6" stroke-dasharray="24 100" stroke-dashoffset="-25.1" stroke-linecap="round"/><circle cx="16" cy="16" r="12" fill="none" stroke="#9B72CB" stroke-width="2.6" stroke-dasharray="24 100" stroke-dashoffset="-50.2" stroke-linecap="round"/></svg>
+        <svg class="hero-mark" viewBox="0 0 32 32" aria-hidden="true"><circle cx="16" cy="16" r="12" fill="none" stroke="#D97757" stroke-width="2.6" stroke-dasharray="24 100" stroke-linecap="round"/><circle cx="16" cy="16" r="12" fill="none" class="arc-ink" stroke-width="2.6" stroke-dasharray="24 100" stroke-dashoffset="-25.1" stroke-linecap="round"/><circle cx="16" cy="16" r="12" fill="none" stroke="#9B72CB" stroke-width="2.6" stroke-dasharray="24 100" stroke-dashoffset="-50.2" stroke-linecap="round"/></svg>
         <h1 class="hero-title">What should they <em>debate</em>?</h1>
-        <p class="hero-sub">Ask once. Every seat answers on its own, cross-examines the others, then they vote on what holds up.</p>
       </div>
 
       <div class="composer">
@@ -510,13 +593,32 @@ main { max-width: none; padding: 0 40px 90px; display: flex; flex-direction: col
   function seatKey(a) { return a.cliType === "text" ? (a.command || "text") : a.cliType; }
   function themeFor(id) {
     var a = agentInfo(id);
-    var picked = state.pickers && state.pickers[id] ? state.pickers[id].model.value : null;
+    var picked = state.pickers && state.pickers[id] ? state.pickers[id].value().model : null;
     var t = a ? themeForSeat(picked || a.model, seatKey(a)) : null;
-    if (t) return t;
+    if (t) return paint(t);
     var ids = state.config ? state.config.agents.map(function (x) { return x.id; }) : [];
     var idx = Math.max(0, ids.indexOf(id));
     var color = PALETTE[idx % PALETTE.length];
-    return { name: id, color: color, soft: "#eef0f6", glyph: (id[0] || "?").toUpperCase() };
+    return paint({ name: id, color: color, soft: "#eef0f6", glyph: (id[0] || "?").toUpperCase() });
+  }
+  // Seat colours are tuned for the light page. On the dark page, near-black marks (ChatGPT, Grok…)
+  // turn light and the pale tints become dark ones, so every seat stays readable.
+  function hexRgb(hex) {
+    var s = String(hex || "").replace("#", "");
+    if (s.length === 3) s = s.replace(/./g, "$&$&");
+    var n = parseInt(s, 16) || 0;
+    return [n >> 16 & 255, n >> 8 & 255, n & 255];
+  }
+  function mixHex(a, b, w) {
+    var x = hexRgb(a), y = hexRgb(b);
+    return "#" + x.map(function (v, i) { return ("0" + Math.round(v * w + y[i] * (1 - w)).toString(16)).slice(-2); }).join("");
+  }
+  function paint(t) {
+    if (!isDark()) return t;
+    var rgb = hexRgb(t.color);
+    var light = (0.2126 * rgb[0] + 0.7152 * rgb[1] + 0.0722 * rgb[2]) / 255 < 0.3;
+    var color = light ? "#e4dfd7" : t.color;
+    return Object.assign({}, t, { color: color, soft: mixHex(color, "#221f1b", 0.2), tile: t.tile && light ? "#e4dfd7" : t.tile, ink: light ? "#181613" : "#fff" });
   }
   function themeVars(t) {
     return "--c:" + t.color + (t.gradient ? ";--g:linear-gradient(100deg," + t.gradient.join(",") + ")" : "");
@@ -532,7 +634,7 @@ main { max-width: none; padding: 0 40px 90px; display: flex; flex-direction: col
   }
   function markTheme(t) {
     if (t.knot) {
-      return h("span", { class: "mark", style: "background:" + t.tile }, svg("svg", { viewBox: "0 0 24 24", width: 14, height: 14 }, knot("#fff")));
+      return h("span", { class: "mark", style: "background:" + t.tile }, svg("svg", { viewBox: "0 0 24 24", width: 14, height: 14 }, knot(t.ink || "#fff")));
     }
     var style = t.gradient ? "background:linear-gradient(135deg," + t.gradient.join(",") + ");color:#fff"
       : "background:" + t.soft + ";color:" + t.color;
@@ -561,6 +663,40 @@ main { max-width: none; padding: 0 40px 90px; display: flex; flex-direction: col
   function storeGet(key) { try { return JSON.parse(localStorage.getItem(key) || "null"); } catch (e) { return null; } }
   function storeSet(key, v) { try { localStorage.setItem(key, JSON.stringify(v)); } catch (e) { /* private mode: not remembered */ } }
 
+  // ---------- theme: Light, Dark, or Default (follow this computer's setting) ----------
+  var darkQuery = window.matchMedia ? matchMedia("(prefers-color-scheme: dark)") : null;
+  function themePref() { var p = document.documentElement.getAttribute("data-theme-pref"); return p === "light" || p === "dark" ? p : "system"; }
+  function isDark() { return document.documentElement.getAttribute("data-theme") === "dark"; }
+  function applyTheme() {
+    var pref = themePref();
+    var dark = pref === "dark" || (pref === "system" && !!(darkQuery && darkQuery.matches));
+    var changed = dark !== isDark();
+    document.documentElement.setAttribute("data-theme", dark ? "dark" : "light");
+    [].forEach.call(document.querySelectorAll("[data-theme-pick]"), function (b) {
+      b.setAttribute("aria-checked", String(b.getAttribute("data-theme-pick") === pref));
+    });
+    // Seat marks and usage rings carry inline colours: redraw them for the new background.
+    if (changed) {
+      renderSeats();
+      Object.keys(pods).forEach(function (k) { pods[k].el.remove(); delete pods[k]; });
+      loadUsage();
+      if (state.selected) render();
+    }
+  }
+  [].forEach.call(document.querySelectorAll("[data-theme-pick]"), function (b) {
+    b.addEventListener("click", function () {
+      var pick = b.getAttribute("data-theme-pick");
+      document.documentElement.setAttribute("data-theme-pref", pick);
+      applyTheme();
+      // Saved in the workspace config: the desk opens on a new port each time, so the browser alone would forget.
+      api("/api/desk/theme", { method: "POST", body: { theme: pick } }).catch(function (e) { showFormError("Could not save the theme: " + e.message); });
+    });
+  });
+  if (darkQuery) {
+    var onSystemTheme = function () { if (themePref() === "system") applyTheme(); };
+    if (darkQuery.addEventListener) darkQuery.addEventListener("change", onSystemTheme); else darkQuery.addListener(onSystemTheme);
+  }
+
   // Asks each installed CLI for its model catalog (agy models, codex debug models): no prompts, no tokens.
   function scanClis() {
     if (state.scanning) return state.scanning;
@@ -580,10 +716,35 @@ main { max-width: none; padding: 0 40px 90px; display: flex; flex-direction: col
     return models.filter(function (m, i) { return m && models.indexOf(m) === i; });
   }
   function effortOptionsFor(a, model) {
+    if (a.effortInModel) return Object.keys(variantsFor(a).groups[model] || {}).filter(Boolean).sort(byEffort);
     var cli = state.clis && state.clis[seatKey(a)];
     if (!cli) return [];
     var byModel = cli.effortsByModel && cli.effortsByModel[model];
     return byModel && byModel.length ? byModel : (cli.efforts || []);
+  }
+  // Antigravity puts the effort in the model id (gemini-4-argon-high). The desk shows those as a
+  // model (gemini-4-argon) plus an effort (high), the same pair every other seat has.
+  var EFFORT_SUFFIX = /^(.+)-(minimal|low|medium|high|xhigh|max)$/;
+  var EFFORT_RANK = ["minimal", "low", "medium", "high", "xhigh", "max", "ultra"];
+  function byEffort(x, y) { return EFFORT_RANK.indexOf(x) - EFFORT_RANK.indexOf(y); }
+  function splitModel(m) { var s = EFFORT_SUFFIX.exec(m); return s ? { base: s[1], effort: s[2] } : { base: m, effort: "" }; }
+  // { order: [base…], groups: { base: { effort: modelId } } }; "" holds a model id with no effort suffix.
+  function variantsFor(a) {
+    var out = { order: [], groups: {} };
+    modelOptionsFor(a).forEach(function (m) {
+      var s = splitModel(m);
+      if (!out.groups[s.base]) { out.groups[s.base] = {}; out.order.push(s.base); }
+      out.groups[s.base][s.effort] = m;
+    });
+    return out;
+  }
+  // The model id to run. "Default" effort keeps the seat's own model when it is this one,
+  // otherwise the middle tier the CLI lists.
+  function resolveVariant(a, base, effort) {
+    var g = variantsFor(a).groups[base] || {};
+    if (effort && g[effort]) return g[effort];
+    if (splitModel(a.model).base === base) return a.model;
+    return g[""] || g.medium || g[Object.keys(g).sort(byEffort)[0]] || base;
   }
 
   function loadConfig() {
@@ -615,13 +776,20 @@ main { max-width: none; padding: 0 40px 90px; display: flex; flex-direction: col
       var cli = state.clis && state.clis[seatKey(a)];
       var cb = h("input", { type: "checkbox", value: a.id });
       cb.checked = a.id in prevChecked ? prevChecked[a.id] : cfg.defaults.agents.indexOf(a.id) >= 0;
-      var models = modelOptionsFor(a);
+      // A model picked earlier as a full id (gemini-4-argon-high) comes back as model + effort.
+      if (a.effortInModel && saved.model) {
+        var savedSplit = splitModel(saved.model);
+        saved = { model: savedSplit.base, effort: saved.effort || savedSplit.effort };
+      }
+      var models = a.effortInModel ? variantsFor(a).order : modelOptionsFor(a);
       var modelSel = h("select", { class: "pick", "aria-label": "Model for " + a.id });
       models.forEach(function (m) {
         var note = cli && cli.modelNotes && cli.modelNotes[m];
         modelSel.appendChild(h("option", { value: m, text: m + (note ? " (" + note + ")" : "") }));
       });
       if (saved.model && models.indexOf(saved.model) >= 0) modelSel.value = saved.model;
+      // Every seat shows the same effort picker: "default" until one is chosen, then only the
+      // levels this model accepts.
       var effortSel = h("select", { class: "pick", "aria-label": "Effort for " + a.id });
       function fillEfforts() {
         var opts = effortOptionsFor(a, modelSel.value);
@@ -630,15 +798,25 @@ main { max-width: none; padding: 0 40px 90px; display: flex; flex-direction: col
         effortSel.appendChild(h("option", { value: "", text: "effort: default" }));
         opts.forEach(function (e) { effortSel.appendChild(h("option", { value: e, text: "effort: " + e })); });
         effortSel.value = opts.indexOf(keep) >= 0 ? keep : "";
-        effortSel.style.display = opts.length ? "" : "none";
+        effortSel.disabled = !opts.length;
+        effortSel.title = !opts.length
+          ? (state.clis ? "This CLI has no effort setting argue can pass, so it uses its own default." : "Loading this model's effort levels…")
+          : a.effortInModel ? "Default runs " + resolveVariant(a, modelSel.value, "") + "."
+          : "Default leaves the effort to " + (cli ? cli.label : "the CLI") + "'s own setting.";
       }
       fillEfforts();
       function remember() { storeSet("argue.seat." + a.id, { model: modelSel.value, effort: effortSel.value }); }
       modelSel.addEventListener("change", function () { fillEfforts(); remember(); });
-      effortSel.addEventListener("change", remember);
-      state.pickers[a.id] = { model: modelSel, effort: effortSel };
+      effortSel.addEventListener("change", function () { fillEfforts(); remember(); });
+      state.pickers[a.id] = {
+        model: modelSel, effort: effortSel,
+        // What this debate runs: Antigravity gets the full model id and no separate effort flag.
+        value: function () {
+          return a.effortInModel ? { model: resolveVariant(a, modelSel.value, effortSel.value), effort: "" }
+            : { model: modelSel.value, effort: effortSel.value };
+        }
+      };
       var pickers = h("div", { class: "seat-pick" }, modelSel, effortSel);
-      if (a.cliType === "antigravity") pickers.title = "Antigravity models carry their effort in the name (low / medium / high).";
       box.appendChild(h("div", { class: "seat-opt" },
         h("label", { class: "seat-main" }, cb, mark(a.id), h("span", { text: a.id })),
         h("button", { class: "rm", type: "button", title: "Remove this seat", "aria-label": "Remove seat " + a.id,
@@ -666,7 +844,7 @@ main { max-width: none; padding: 0 40px 90px; display: flex; flex-direction: col
     var settings = {};
     agents.forEach(function (id) {
       var p = state.pickers[id];
-      if (p) settings[id] = { model: p.model.value, effort: p.effort.style.display === "none" ? "" : p.effort.value };
+      if (p) settings[id] = p.value();
     });
     showFormError("");
     btn.disabled = true; btn.textContent = state.attachments.length ? "Uploading files…" : "Starting…";
@@ -810,7 +988,7 @@ main { max-width: none; padding: 0 40px 90px; display: flex; flex-direction: col
       var installed = data.clis.filter(function (c) { return c.installed; });
       if (!installed.length) list.appendChild(h("p", { class: "hint", text: "No known AI CLIs found. Install one below, or use Other CLI for any command-line AI." }));
       installed.forEach(function (cli) {
-        var t = themeForSeat(cli.models && cli.models[0], cli.id) || { glyph: cli.label[0], color: "#555", soft: "#eee" };
+        var t = paint(themeForSeat(cli.models && cli.models[0], cli.id) || { glyph: cli.label[0], color: "#555", soft: "#eee" });
         var seated = state.config.agents.filter(function (a) { return seatKey(a) === cli.id; }).map(function (a) { return a.id; });
         var quick = h("button", { class: "btn small pick", type: "button" }, seated.length ? "Add another" : "Add");
         quick.addEventListener("click", function (ev) {
@@ -1150,16 +1328,136 @@ main { max-width: none; padding: 0 40px 90px; display: flex; flex-direction: col
     [].forEach.call(document.querySelectorAll("details.round"), function (d) { d.open = open; });
   }
 
+  // ---------- whose argument is it: claim citations become seat marks ----------
+  // Claim ids are seat:round:index (gemini:0:2); the seat in front is the one that first argued it.
+  function citedSeat(m, id) {
+    var mm = /^([A-Za-z0-9][\w.-]*):\d+:\d+$/.exec(id);
+    return mm && m.participants.indexOf(mm[1]) >= 0 ? mm[1] : null;
+  }
+  function citeTitle(m, ids) {
+    return ids.filter(function (id, i) { return ids.indexOf(id) === i; })
+      .map(function (id) { return citedSeat(m, id) + ": " + claimLabel(m, id); }).join("\n");
+  }
+  function citeMark(m, id) {
+    return h("span", { class: "cite", title: citeTitle(m, [id]) }, mark(citedSeat(m, id)));
+  }
+
+  // Light Markdown (bold, italics, code) built from text nodes; claim ids become seat marks.
+  function inlineMd(el, text, cite) {
+    var re = /\*\*([^*]+)\*\*|\u0060([^\u0060]+)\u0060|\*([^*\s][^*]*)\*/g, last = 0, mm;
+    while ((mm = re.exec(text))) {
+      plainText(el, text.slice(last, mm.index), cite);
+      if (mm[1] !== undefined) inlineMd(el.appendChild(h("b")), mm[1], cite);
+      else if (mm[2] !== undefined) el.appendChild(cite(mm[2]) || h("code", { text: mm[2] }));
+      else inlineMd(el.appendChild(h("i")), mm[3], cite);
+      last = re.lastIndex;
+    }
+    plainText(el, text.slice(last), cite);
+  }
+  function plainText(el, text, cite) {
+    var re = /[A-Za-z0-9][\w.-]*:\d+:\d+/g, last = 0, mm;
+    while ((mm = re.exec(text))) {
+      var node = cite(mm[0]);
+      if (!node) continue;
+      el.appendChild(document.createTextNode(text.slice(last, mm.index)));
+      el.appendChild(node);
+      last = re.lastIndex;
+    }
+    el.appendChild(document.createTextNode(text.slice(last)));
+  }
+
+  // The report, passage by passage, each marked with the seats whose claims it cites. A bracket
+  // holding only citations, like (\u0060gemini:0:2\u0060, merged \u0060claude:0:4\u0060), moves into the marks.
+  function renderAnswer(text, m) {
+    var blocks = [], para = null;
+    String(text || "").split(/\r?\n/).forEach(function (raw) {
+      var line = raw.replace(/\s+$/, "");
+      var head = /^\s{0,3}#{1,6}\s+(.*)$/.exec(line);
+      var item = /^(\s*)([-*•]|\d+[.)])\s+(.*)$/.exec(line);
+      if (!line.trim()) para = null;
+      else if (head) { blocks.push({ kind: "h", text: head[1] }); para = null; }
+      else if (item) {
+        var indent = item[1].replace(/\t/g, "    ").length;
+        blocks.push({ kind: "li", lvl: Math.min(3, Math.ceil(indent / 4)), bullet: /\d/.test(item[2]) ? item[2] : "•", text: item[3] });
+        para = null;
+      } else if (para) para.text += " " + line.trim();
+      else { para = { kind: "p", text: line.trim() }; blocks.push(para); }
+    });
+    var anyCites = false;
+    var built = blocks.map(function (b) {
+      var ids = [];
+      var body = b.text.replace(/\s*\(([^()]*)\)/g, function (all, inner) {
+        var found = [];
+        var rest = inner.replace(/\u0060?([A-Za-z0-9][\w.-]*:\d+:\d+)\u0060?/g, function (tok, id) {
+          if (!citedSeat(m, id)) return tok;
+          found.push(id);
+          return "";
+        });
+        rest = rest.replace(/\b(merged|into|and|also|see|claims?|incl|including|via|from|plus)\b/gi, "");
+        if (!found.length || /[A-Za-z0-9]/.test(rest)) return all;
+        ids.push.apply(ids, found);
+        return "";
+      });
+      var el = h(b.kind === "h" ? "h4" : "div", { class: "txt" });
+      inlineMd(el, body, function (tok) {
+        if (!citedSeat(m, tok)) return null;
+        ids.push(tok);
+        return citeMark(m, tok);
+      });
+      if (ids.length) anyCites = true;
+      return { b: b, el: el, ids: ids };
+    });
+    var wrap = h("div", { class: "answer" + (anyCites ? " cited" : "") },
+      anyCites ? h("p", { class: "hint", text: "The marks beside each passage show whose argument it comes from. Hover one to see the claims." }) : null);
+    built.forEach(function (x) {
+      var row = h("div", { class: "blk " + x.b.kind });
+      if (anyCites) {
+        var seats = [];
+        x.ids.forEach(function (id) { var s = citedSeat(m, id); if (seats.indexOf(s) < 0) seats.push(s); });
+        row.appendChild(h("div", { class: "src", role: seats.length ? "img" : null, "aria-label": seats.length ? "From " + seats.join(", ") : null,
+          title: x.ids.length ? citeTitle(m, x.ids) : null }, seats.map(function (s) { return mark(s); })));
+      }
+      if (x.b.kind === "li") {
+        x.el.classList.add("li");
+        x.el.setAttribute("data-bullet", x.b.bullet);
+        x.el.style.setProperty("--lvl", String(x.b.lvl));
+      }
+      row.appendChild(x.el);
+      wrap.appendChild(row);
+    });
+    return wrap;
+  }
+
+  // Which seats' answers made it in: the agreed points each seat argued first.
+  function renderSources(result, m) {
+    var counts = {}, titles = {}, total = 0;
+    (result.claimResolutions || []).forEach(function (cr) {
+      var s = cr.status === "resolved" ? citedSeat(m, cr.claimId) : null;
+      if (!s) return;
+      total += 1;
+      counts[s] = (counts[s] || 0) + 1;
+      (titles[s] = titles[s] || []).push(claimLabel(m, cr.claimId));
+    });
+    if (!total) return null;
+    var seats = m.participants.slice().sort(function (a, b) { return (counts[b] || 0) - (counts[a] || 0); });
+    return h("div", { class: "sources" }, h("span", { class: "sources-label", text: "Agreed points, by who argued them first" }),
+      seats.map(function (s) {
+        return h("span", { class: "chip" + (counts[s] ? "" : " none"), title: titles[s] ? titles[s].join("\n") : "None of this seat's own claims were agreed." },
+          mark(s), s, h("small", { text: (counts[s] || 0) + " of " + total }));
+      }));
+  }
+
   function renderVerdict(result, m, openDetails) {
     var report = result.report || {};
     var card = h("div", { class: "card verdict " + result.status },
       h("div", { class: "meta" }, statusPill(result.status),
         result.representative ? h("span", null, "Written by ", h("b", { style: "color:var(--ink)", text: result.representative.participantId }), ", the top peer score") : null),
-      report.finalSummary ? h("p", { class: "big", text: report.finalSummary }) : null);
+      report.finalSummary ? h("p", { class: "big", text: report.finalSummary }) : null,
+      renderSources(result, m));
     if (report.representativeSpeech) {
-      var d = h("details", { class: "more", "data-key": "speech" }, h("summary", { text: "Read the full report" }), h("p", { class: "prose", text: report.representativeSpeech }));
-      d.open = !!openDetails.speech;
-      card.appendChild(h("div", { style: "margin-top:12px" }, d));
+      var d = h("details", { class: "more", "data-key": "speech" }, h("summary", { text: "Full report" }), renderAnswer(report.representativeSpeech, m));
+      d.open = openDetails.speech !== false;
+      card.appendChild(h("div", { style: "margin-top:14px" }, d));
     }
     if (result.disagreements && result.disagreements.length) {
       card.appendChild(h("div", { class: "block-label", text: "Open disagreements" }));
@@ -1263,6 +1561,14 @@ main { max-width: none; padding: 0 40px 90px; display: flex; flex-direction: col
     return lane;
   }
 
+  // The seat that argued a claim first leads; seats that proposed the same point follow.
+  function proposers(fc, m) {
+    var first = citedSeat(m, fc.claimId);
+    var list = (fc.proposedBy || []).slice();
+    if (first && list.indexOf(first) > 0) { list.splice(list.indexOf(first), 1); list.unshift(first); }
+    return list;
+  }
+
   function renderClaims(result, m) {
     var res = {};
     (result.claimResolutions || []).forEach(function (cr) { res[cr.claimId] = cr; });
@@ -1277,7 +1583,7 @@ main { max-width: none; padding: 0 40px 90px; display: flex; flex-direction: col
         h("span", { class: "pill", text: fc.status || "—" });
       table.appendChild(h("tr", { class: fc.status === "merged" ? "merged" : null },
         h("td", null, h("div", { class: "ct", text: fc.title }), h("p", { class: "stmt", text: fc.statement }),
-          h("div", { class: "by" }, "proposed by ", (fc.proposedBy || []).join(", "))),
+          h("div", { class: "by" }, "proposed by ", proposers(fc, m).map(function (p) { return h("span", { class: "by-seat" }, mark(p), p); }))),
         h("td", { class: "tally" }, label, cr ? h("div", { class: "by", text: cr.acceptCount + " accept · " + cr.rejectCount + " reject of " + cr.totalVoters }) : null)));
     });
     return h("div", { class: "section" }, h("h3", { text: "Claims and how they were resolved" }), h("div", { class: "card" }, table));
@@ -1332,7 +1638,7 @@ main { max-width: none; padding: 0 40px 90px; display: flex; flex-direction: col
   // Pods are created once and then updated in place, so the ring animates from its last value.
   var pods = {};
   function buildPod(seat) {
-    var t = themeForSeat(null, seat.cliType) || { name: seat.cliType, color: "#555", soft: "#e8e8e8", glyph: "●" };
+    var t = paint(themeForSeat(null, seat.cliType) || { name: seat.cliType, color: "#555", soft: "#e8e8e8", glyph: "●" });
     var gid = "g-" + seat.cliType;
     var defs = t.gradient ? svg("defs", {}, svg("linearGradient", { id: gid, x1: "0", y1: "0", x2: "1", y2: "1" },
       svg("stop", { offset: "0", "stop-color": t.gradient[0] }), svg("stop", { offset: ".55", "stop-color": t.gradient[1] }), svg("stop", { offset: "1", "stop-color": t.gradient[2] }))) : null;
@@ -1436,6 +1742,7 @@ main { max-width: none; padding: 0 40px 90px; display: flex; flex-direction: col
     document.getElementById("main").textContent = "Missing access token. Open the desk from its shortcut or the link printed by argue ui.";
     return;
   }
+  applyTheme();
   loadConfig().then(function () { loadUsage(); loadLibrary(); scanClis().catch(function () {}); return refreshRuns(); }).then(function () { showView("composer"); });
   setInterval(function () { if (!state.closed) refreshRuns(); }, 5000);
   setInterval(loadUsage, 30000);

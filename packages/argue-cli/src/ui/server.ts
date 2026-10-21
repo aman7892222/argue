@@ -5,7 +5,7 @@ import { mkdir, readdir, readFile, stat, writeFile } from "node:fs/promises";
 import { createServer, type IncomingMessage, type Server, type ServerResponse } from "node:http";
 import { basename, dirname, isAbsolute, join } from "node:path";
 import { fileURLToPath } from "node:url";
-import { loadWorkspaceConfig, type LoadedCliConfig } from "../config.js";
+import { DESK_THEMES, loadWorkspaceConfig, type DeskTheme, type LoadedCliConfig } from "../config.js";
 import { newRequestId, REQUEST_ID_PATTERN } from "../request-id.js";
 import { resolveOutputPaths, resolveRunPlan } from "../run-plan.js";
 import { catalogId, detectClis, KNOWN_CLIS } from "../cli-catalog.js";
@@ -117,7 +117,14 @@ export async function startUiServer(options: UiServerOptions = {}): Promise<UiSe
         "content-security-policy":
           "default-src 'none'; script-src 'unsafe-inline'; style-src 'unsafe-inline'; connect-src 'self'; img-src data:; base-uri 'none'; form-action 'none'"
       });
-      res.end(renderUiPage());
+      // The saved theme goes into the page itself, so it paints in the right colours at once.
+      let theme: DeskTheme = "system";
+      try {
+        theme = (await loadConfig()).config.desk?.theme ?? "system";
+      } catch {
+        // a broken config is reported by /api/config; the page still opens
+      }
+      res.end(renderUiPage({ theme }));
       return;
     }
 
@@ -163,6 +170,7 @@ export async function startUiServer(options: UiServerOptions = {}): Promise<UiSe
           modelHint: d.cli.modelHint ?? null,
           efforts: d.efforts,
           effortsByModel: d.effortsByModel,
+          effortInModel: !!d.cli.effortInModelName,
           modelNotes: d.cli.modelNotes ?? {},
           note: d.cli.note ?? null,
           install: d.cli.install
@@ -214,7 +222,11 @@ export async function startUiServer(options: UiServerOptions = {}): Promise<UiSe
             role: agent.role,
             cliType: provider?.type === "cli" ? provider.cliType : null,
             // Lets the page match a custom seat to its catalog entry and theme (e.g. "ollama").
-            command: provider?.type === "cli" && provider.command ? commandName(provider.command) : null
+            command: provider?.type === "cli" && provider.command ? commandName(provider.command) : null,
+            // Known before the (slower) CLI scan, so the model + effort pickers never change shape.
+            effortInModel:
+              provider?.type === "cli" &&
+              KNOWN_CLIS.some((cli) => !cli.id && cli.cliType === provider.cliType && cli.effortInModelName)
           };
         }),
         defaults: {
@@ -278,6 +290,23 @@ export async function startUiServer(options: UiServerOptions = {}): Promise<UiSe
       }
       summaries.sort((a, b) => String(b.requestId).localeCompare(String(a.requestId)));
       sendJson(res, 200, { runs: summaries });
+      return;
+    }
+
+    if (req.method === "POST" && url.pathname === "/api/desk/theme") {
+      // Kept in the workspace config: the desk runs on a new port each time, so browser storage forgets it.
+      const body = (await readBody(req)) as { theme?: unknown } | null;
+      const theme = DESK_THEMES.find((t) => t === body?.theme);
+      if (!theme) {
+        sendJson(res, 400, { error: `theme must be one of ${DESK_THEMES.join(", ")}` });
+        return;
+      }
+      const loaded = await loadConfig();
+      const raw = JSON.parse(await readFile(loaded.configPath, "utf8")) as Record<string, unknown>;
+      const desk = raw.desk && typeof raw.desk === "object" ? (raw.desk as Record<string, unknown>) : {};
+      raw.desk = { ...desk, theme };
+      await writeValidated(loaded.configPath, raw);
+      sendJson(res, 200, { theme });
       return;
     }
 

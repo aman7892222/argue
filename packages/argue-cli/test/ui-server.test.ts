@@ -218,6 +218,21 @@ describe("ui server", () => {
     expect((await call(server, "/api/seats/nobody", { method: "DELETE" })).status).toBe(400);
   });
 
+  it("saves the desk theme in the config and serves the page with it", async () => {
+    const { configPath } = await makeWorkspace();
+    server = await startUiServer({ configPath });
+
+    expect((await call(server, "/", { token: null })).text).toContain('var pref = "system";');
+    expect((await call(server, "/api/desk/theme", { method: "POST", body: { theme: "dark" } })).status).toBe(200);
+    expect((JSON.parse(await readFile(configPath, "utf8")) as { desk?: unknown }).desk).toEqual({ theme: "dark" });
+    expect((await call(server, "/", { token: null })).text).toContain('var pref = "dark";');
+
+    expect((await call(server, "/api/desk/theme", { method: "POST", body: { theme: "neon" } })).status).toBe(400);
+    expect(
+      (await call(server, "/api/desk/theme", { method: "POST", token: null, body: { theme: "light" } })).status
+    ).toBe(401);
+  });
+
   it("stops when the page asks it to quit, and after going idle", async () => {
     const { configPath } = await makeWorkspace();
     const quitting = await startUiServer({ configPath });

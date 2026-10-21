@@ -186,6 +186,9 @@ export const ViewerConfigSchema = z
   })
   .strict();
 
+export const DESK_THEMES = ["light", "dark", "system"] as const;
+export type DeskTheme = (typeof DESK_THEMES)[number];
+
 const CliConfigSchemaBase = z
   .object({
     schemaVersion: z.literal(1),
@@ -194,6 +197,11 @@ const CliConfigSchemaBase = z
     /** Where the debate desk saves finished debates (report.pdf / report.html / debate.json). */
     library: z
       .object({ dir: z.string().min(1) })
+      .strict()
+      .optional(),
+    /** Debate desk look: light, dark, or "system" to follow the computer's setting (the default). */
+    desk: z
+      .object({ theme: z.enum(DESK_THEMES).optional() })
       .strict()
       .optional(),
     defaults: DefaultsSchema.optional(),

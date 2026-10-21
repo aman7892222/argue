@@ -6,7 +6,7 @@ import { KNOWN_CLIS, parseLlmModels, parseOllamaList } from "../src/cli-catalog.
 import { resolveAttachments } from "../src/index.js";
 import { createCliRunner, debateAttachments } from "../src/runtime/cli.js";
 import { debateFolderName, isInside, listLibrary, saveToLibrary } from "../src/ui/library.js";
-import { esc, mdToHtml, renderReportHtml } from "../src/ui/report.js";
+import { citedMdToHtml, esc, mdToHtml, renderReportHtml, takeCitations } from "../src/ui/report.js";
 import { parseAddSeatRequest } from "../src/ui/seats.js";
 import { parseAttachments } from "../src/ui/server.js";
 import { SEAT_THEMES, seatIconSvg, themeForSeat } from "../src/ui/themes.js";
@@ -185,6 +185,32 @@ describe("library", () => {
     expect(html).toContain("<li><b>Fri</b>: write</li>");
     expect(mdToHtml("**<img src=x onerror=alert(1)>**")).toBe("<p><b>&lt;img src=x onerror=alert(1)&gt;</b></p>");
     expect(esc(`"'&`)).toBe("&quot;&#39;&amp;");
+  });
+
+  it("marks each passage of the report with the seats whose claims it cites", () => {
+    const isClaim = (id: string): boolean => /^(gemini|claude):/.test(id);
+    expect(takeCitations("**Stack (`gemini:0:0`, merged `claude:0:2` & `claude:1:0`):** use Astro", isClaim)).toEqual({
+      text: "**Stack:** use Astro",
+      ids: ["gemini:0:0", "claude:0:2", "claude:1:0"]
+    });
+    // Brackets with other words, or ids of seats not in the debate, stay as written.
+    expect(takeCitations("Deploy early (see `gemini:0:1` for DNS)", isClaim).ids).toEqual([]);
+    expect(takeCitations("at (`other:0:1`)", isClaim).text).toBe("at (`other:0:1`)");
+
+    const cite = {
+      seatOf: (id: string) => (isClaim(id) ? id.split(":")[0]! : null),
+      mark: (seat: string) => `<i data-seat="${seat}"></i>`,
+      label: (id: string) => `${id} <title>`
+    };
+    const html = citedMdToHtml("### Plan\n- Cut scope (`gemini:0:2`, `claude:0:1`)\nAs `claude:0:1` said", cite)!;
+    expect(html).toContain(
+      '<div class="src" title="gemini:0:2 &lt;title&gt;\nclaude:0:1 &lt;title&gt;"><i data-seat="gemini"></i><i data-seat="claude"></i></div>'
+    );
+    expect(html).toContain('data-bullet="•">Cut scope</div>');
+    expect(html).toContain(
+      'As <span class="cite" title="claude:0:1 &lt;title&gt;"><i data-seat="claude"></i></span> said'
+    );
+    expect(citedMdToHtml("No citations here, and `code` stays code.", cite)).toBeNull();
   });
 
   it("makes safe folder names and never writes outside the library", () => {
