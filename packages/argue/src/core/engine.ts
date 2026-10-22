@@ -519,7 +519,8 @@ export class ArgueEngine {
           round: args.round,
           reason,
           activeParticipants: args.activeParticipants,
-          eliminations: args.eliminations
+          eliminations: args.eliminations,
+          error: event.error
         });
 
         if (!wasActive) return;
@@ -833,6 +834,7 @@ export class ArgueEngine {
     reason: "timeout" | "error";
     activeParticipants: Set<string>;
     eliminations: EliminationRecord[];
+    error?: string;
   }): void {
     if (!args.activeParticipants.has(args.participantId)) {
       return;
@@ -843,7 +845,8 @@ export class ArgueEngine {
       participantId: args.participantId,
       round: args.round,
       reason: args.reason,
-      at: new Date(this.now()).toISOString()
+      at: new Date(this.now()).toISOString(),
+      ...(args.error ? { error: args.error } : {})
     });
   }
 

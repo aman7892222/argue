@@ -42,7 +42,7 @@ You only do this once. It takes about 10 minutes.
    npm run build
    ```
 4. **Install at least one AI CLI and sign in to it.** The desk uses your own subscriptions. Any of these works:
-   - Claude Code: `irm https://claude.ai/install.ps1 | iex` on Windows, or `curl -fsSL https://claude.ai/install.sh | bash` on Mac/Linux. Then run `claude` once to sign in.
+   - Claude Code: `irm https://claude.ai/install.ps1 | iex` on Windows, or `curl -fsSL https://claude.ai/install.sh | bash` on Mac/Linux. Then run `claude auth login` once. The Claude Code CLI has its **own** credentials — signing in to the Claude Desktop app does not sign in the CLI, so this step is still needed if the desktop app is already installed.
    - ChatGPT (Codex): `npm install -g @openai/codex`, then `codex login`.
    - Gemini (Antigravity): `winget install Google.AntigravityCLI` (Mac/Linux: see antigravity.google), then run `agy` once to sign in.
    - Local models, free and offline: [Ollama](https://ollama.com/download), then `ollama pull llama3.3`.
