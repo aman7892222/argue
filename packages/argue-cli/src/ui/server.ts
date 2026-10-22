@@ -288,11 +288,12 @@ export async function startUiServer(options: UiServerOptions = {}): Promise<UiSe
         seats.set(provider.cliType, [...(seats.get(provider.cliType) ?? []), agent.id]);
         if (provider.cliType === "codex") codexCommand ??= provider.command ?? "codex";
       }
-      // The page asks every minute; Codex's limits come live from its account (no prompt).
-      const usage = await readSeatUsage(
-        [...seats.keys()],
-        codexCommand ? { liveCodex: { command: codexCommand } } : {}
-      );
+      // The page asks every minute (every 15 s while a debate runs). Codex's and Claude's limits
+      // come live from their accounts (no prompt).
+      const usage = await readSeatUsage([...seats.keys()], {
+        liveClaude: true,
+        ...(codexCommand ? { liveCodex: { command: codexCommand } } : {})
+      });
       sendJson(res, 200, {
         seats: [...seats.entries()].map(([cliType, agents]) => ({
           cliType,

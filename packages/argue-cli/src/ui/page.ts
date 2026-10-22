@@ -2105,9 +2105,11 @@ main { max-width: none; padding: 0 40px 90px; display: flex; flex-direction: col
         pod.tip.appendChild(h("div", { class: "w" }, h("span", { text: w.label + " limit" }), h("span", { text: Math.round(100 - w.usedPercent) + "% left" }),
           h("small", { text: fmtReset(w.resetsAt) })));
       });
-      var from = u.live ? "Checked with your Codex account" : u.source === "claude" ? "Reported by Claude with its last answer" : "Read from Codex's own log";
+      var from = u.live ? (u.source === "claude" ? "Checked with your Claude account" : "Checked with your Codex account") :
+        u.source === "claude" ? "Reported by Claude with its last answer" : "Read from Codex's own log";
       pod.tip.appendChild(h("div", { class: "muted", text: from + (u.observedAt ? ", " + fmtAgo(u.observedAt) : "") + ". Shared with everything else you use this plan for." +
-        (u.source === "claude" ? " Claude Code can only report usage with an answer, so this updates when Claude answers." : " Refreshed every minute.") }));
+        (u.live ? " Refreshed every minute, every 15 seconds while a debate runs." :
+          u.source === "claude" ? " Couldn't reach your Claude account, so this updates when Claude answers." : " Refreshed every minute.") }));
     } else if (u.kind === "tokens") {
       pod.num.textContent = fmtTokens(u.totalTokens);
       pod.num.appendChild(h("small", { text: " tokens" }));
@@ -2183,8 +2185,12 @@ main { max-width: none; padding: 0 40px 90px; display: flex; flex-direction: col
     return refreshRuns();
   }).then(function () { showView("composer"); });
   setInterval(function () { if (!state.closed) refreshRuns(); }, 5000);
-  // Plan usage every minute (and right after any seat answers, from poll()).
-  setInterval(loadUsage, 60000);
+  // Plan usage every minute, every 15 s while a debate runs (and right after any seat answers, from poll()).
+  var lastUsageAt = Date.now();
+  setInterval(function () {
+    var running = (state.runs || []).some(function (r) { return runStatus(r) === "in_progress" && (!r.process || r.process.state === "running"); });
+    if (running || Date.now() - lastUsageAt >= 60000) { lastUsageAt = Date.now(); loadUsage(); }
+  }, 15000);
 })();
 </script>
 </body>

@@ -1,3 +1,4 @@
+import { execFile } from "node:child_process";
 import { mkdir, readdir, readFile, rename, writeFile } from "node:fs/promises";
 import { homedir } from "node:os";
 import { dirname, join } from "node:path";
@@ -5,9 +6,9 @@ import spawn from "cross-spawn";
 
 /**
  * Subscription usage for each seat, as far as each CLI reveals it:
- * - claude: every `--output-format stream-json` call reports a `rate_limit_event` with
- *   5-hour / 7-day utilization; argue records the latest one in a small ledger file. Claude
- *   Code has no way to report usage without a prompt, so this changes when Claude answers.
+ * - claude: read live from the account with the login Claude Code saved (the same usage request
+ *   its `/usage` uses; no prompt). Failing that, every `--output-format stream-json` call reports
+ *   a `rate_limit_event` with 5-hour / 7-day utilization, which argue keeps in a small ledger.
  * - codex: asked live from the account (`codex app-server`, no prompt) when the desk wants it;
  *   otherwise the newest `rate_limits` Codex wrote into its own session logs.
  * - antigravity: agy reports token counts but not its quota, so argue can only count the
@@ -243,6 +244,121 @@ function liveCodexLimits(
   return liveCodex.read;
 }
 
+/** Claude Code's saved login: ~/.claude/.credentials.json, or the macOS Keychain. */
+type ClaudeOAuth = { accessToken?: unknown; expiresAt?: unknown };
+
+async function readClaudeOAuth(env: NodeJS.ProcessEnv): Promise<ClaudeOAuth | null> {
+  const dir = env.CLAUDE_CONFIG_DIR ?? join(homedir(), ".claude");
+  const parse = (raw: string): ClaudeOAuth | null => {
+    try {
+      const oauth = (JSON.parse(raw) as { claudeAiOauth?: ClaudeOAuth }).claudeAiOauth;
+      return oauth && typeof oauth.accessToken === "string" ? oauth : null;
+    } catch {
+      return null;
+    }
+  };
+  try {
+    const fromFile = parse(await readFile(join(dir, ".credentials.json"), "utf8"));
+    if (fromFile) return fromFile;
+  } catch {
+    // no file: macOS keeps it in the Keychain
+  }
+  if (process.platform !== "darwin") return null;
+  return new Promise((resolve) => {
+    execFile(
+      "security",
+      ["find-generic-password", "-s", "Claude Code-credentials", "-w"],
+      { timeout: 5_000, windowsHide: true },
+      (error, stdout) => resolve(error ? null : parse(String(stdout).trim()))
+    );
+  });
+}
+
+type ClaudeUsageWindow = { utilization?: unknown; resets_at?: unknown } | null | undefined;
+
+/** Parses the account usage response (`utilization` is a percentage, `resets_at` an ISO time). */
+export function parseClaudeAccountUsage(body: unknown): UsageWindow[] {
+  const record = body as Record<string, ClaudeUsageWindow> | null;
+  if (!record || typeof record !== "object") return [];
+  const labels: Array<[string, string]> = [
+    ["five_hour", "5-hour"],
+    ["seven_day", "7-day"]
+  ];
+  const out: UsageWindow[] = [];
+  for (const [key, label] of labels) {
+    const w = record[key];
+    if (!w || typeof w.utilization !== "number") continue;
+    const reset = typeof w.resets_at === "string" ? Date.parse(w.resets_at) : NaN;
+    out.push({
+      label,
+      usedPercent: Math.round(w.utilization * 10) / 10,
+      resetsAt: Number.isFinite(reset) ? Math.floor(reset / 1000) : null
+    });
+  }
+  return out;
+}
+
+/**
+ * Claude's current limits straight from the account, using the login Claude Code saved: the
+ * same request Claude Code's `/usage` makes. No prompt and no model turn. Read-only: an expired
+ * login is left for Claude Code to refresh. Resolves null when anything is missing or fails.
+ */
+export async function readClaudeLiveUsage(
+  options: {
+    env?: NodeJS.ProcessEnv;
+    now?: () => Date;
+    timeoutMs?: number;
+    fetchImpl?: typeof fetch;
+    oauth?: ClaudeOAuth | null;
+  } = {}
+): Promise<{ windows: UsageWindow[]; observedAt: string } | null> {
+  const now = options.now ?? (() => new Date());
+  try {
+    const oauth = options.oauth !== undefined ? options.oauth : await readClaudeOAuth(options.env ?? process.env);
+    if (!oauth || typeof oauth.accessToken !== "string") return null;
+    if (typeof oauth.expiresAt === "number" && oauth.expiresAt <= now().getTime() + 30_000) return null;
+    const response = await (options.fetchImpl ?? fetch)("https://api.anthropic.com/api/oauth/usage", {
+      headers: {
+        Authorization: `Bearer ${oauth.accessToken}`,
+        "anthropic-beta": "oauth-2025-04-20",
+        Accept: "application/json"
+      },
+      signal: AbortSignal.timeout(options.timeoutMs ?? 8_000)
+    });
+    if (!response.ok) return null;
+    const windows = parseClaudeAccountUsage(await response.json());
+    return windows.length ? { windows, observedAt: now().toISOString() } : null;
+  } catch {
+    return null;
+  }
+}
+
+// The desk asks often while a debate runs; one live read serves every request inside this time.
+const LIVE_CLAUDE_MAX_AGE_MS = 10_000;
+let liveClaude: { at: number; read: ReturnType<typeof readClaudeLiveUsage> } | null = null;
+
+function liveClaudeUsage(env: NodeJS.ProcessEnv, now: Date): ReturnType<typeof readClaudeLiveUsage> {
+  if (!liveClaude || now.getTime() - liveClaude.at > LIVE_CLAUDE_MAX_AGE_MS) {
+    const read = readClaudeLiveUsage({ env });
+    liveClaude = { at: now.getTime(), read };
+    // Keep the ledger current too, so a later offline read starts from this.
+    void read.then((r) => {
+      if (r)
+        void updateLedger(
+          (ledger) => (ledger.claude = { windows: r.windows, observedAt: r.observedAt }),
+          usageLedgerPath(env)
+        );
+    });
+  }
+  return liveClaude.read;
+}
+
+/** Test hook: forget the cached live reads. */
+export function resetLiveUsageCache(): void {
+  liveClaude = null;
+  liveCodex = null;
+}
+
 function findRateLimits(value: unknown, depth = 0): { primary?: CodexWindow; secondary?: CodexWindow } | null {
   if (!value || typeof value !== "object" || depth > 6) return null;
   const record = value as Record<string, unknown>;
@@ -294,6 +410,8 @@ export async function readSeatUsage(
     now?: Date;
     /** Ask Codex's account for its current limits (the desk), with this command. */
     liveCodex?: { command: string };
+    /** Ask Claude's account for its current limits (the desk), with Claude Code's saved login. */
+    liveClaude?: boolean;
   } = {}
 ): Promise<Record<string, SeatUsage>> {
   const env = options.env ?? process.env;
@@ -303,14 +421,32 @@ export async function readSeatUsage(
 
   for (const cliType of new Set(cliTypes)) {
     if (cliType === "claude") {
-      out.claude = ledger.claude
-        ? {
-            kind: "limits",
-            source: "claude",
-            windows: rollOver(ledger.claude.windows, now),
-            observedAt: ledger.claude.observedAt
-          }
-        : { kind: "unknown", source: "claude", reason: "Shown after the Claude seat's first call in a debate." };
+      const live = options.liveClaude ? await liveClaudeUsage(env, now) : null;
+      if (live) {
+        out.claude = {
+          kind: "limits",
+          source: "claude",
+          windows: live.windows,
+          observedAt: live.observedAt,
+          live: true
+        };
+      } else if (ledger.claude && !allReset(ledger.claude.windows, now)) {
+        out.claude = {
+          kind: "limits",
+          source: "claude",
+          windows: rollOver(ledger.claude.windows, now),
+          observedAt: ledger.claude.observedAt
+        };
+      } else {
+        // Every window in the last reading has reset since: showing 0% would be a guess.
+        out.claude = {
+          kind: "unknown",
+          source: "claude",
+          reason: ledger.claude
+            ? "The last reading is from before your limits reset. Shown again when Claude answers, or once Claude Code is signed in on this computer."
+            : "Shown after the Claude seat's first answer, or once Claude Code is signed in on this computer."
+        };
+      }
     } else if (cliType === "codex") {
       const live = options.liveCodex ? await liveCodexLimits(options.liveCodex.command, env, now) : null;
       const codex = live ?? (await readCodexRateLimits(env));
@@ -337,6 +473,11 @@ export async function readSeatUsage(
     }
   }
   return out;
+}
+
+function allReset(windows: UsageWindow[], now: Date): boolean {
+  const nowSeconds = now.getTime() / 1000;
+  return windows.length > 0 && windows.every((w) => w.resetsAt !== null && w.resetsAt <= nowSeconds);
 }
 
 function rollOver(windows: UsageWindow[], now: Date): UsageWindow[] {

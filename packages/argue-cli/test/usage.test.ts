@@ -1,16 +1,19 @@
 import { mkdir, mkdtemp, readFile, writeFile } from "node:fs/promises";
 import { tmpdir } from "node:os";
 import { delimiter, dirname, join } from "node:path";
-import { describe, expect, it } from "vitest";
+import { afterEach, describe, expect, it, vi } from "vitest";
 import { describeDrop } from "../src/drop-reason.js";
 import { CliExitError, explainCliFailure, parseClaudeStream } from "../src/runtime/cli.js";
 import {
+  parseClaudeAccountUsage,
   parseClaudeRateLimit,
+  readClaudeLiveUsage,
   readCodexLiveRateLimits,
   readCodexRateLimits,
   readSeatUsage,
   recordAntigravityTokens,
-  recordClaudeRateLimit
+  recordClaudeRateLimit,
+  resetLiveUsageCache
 } from "../src/usage.js";
 
 const CLAUDE_INFO = {
@@ -197,5 +200,81 @@ describe("plan limits", () => {
       observedAt: "2026-10-21T13:00:00.000Z"
     });
     expect(await readCodexLiveRateLimits({ command: join(dir, "missing-codex"), timeoutMs: 3000 })).toBeNull();
+  });
+});
+
+describe("Claude live usage (account)", () => {
+  const BODY = {
+    five_hour: { utilization: 24, resets_at: "2026-10-22T11:20:00.000Z" },
+    seven_day: { utilization: 4, resets_at: "2026-10-23T16:00:00+00:00" },
+    seven_day_opus: null
+  };
+  const okFetch = (body: unknown) =>
+    vi.fn(async () => new Response(JSON.stringify(body), { status: 200 })) as unknown as typeof fetch;
+
+  afterEach(() => {
+    vi.unstubAllGlobals();
+    resetLiveUsageCache();
+  });
+
+  it("parses percent utilization and ISO reset times", () => {
+    expect(parseClaudeAccountUsage(BODY)).toEqual([
+      { label: "5-hour", usedPercent: 24, resetsAt: Date.parse("2026-10-22T11:20:00Z") / 1000 },
+      { label: "7-day", usedPercent: 4, resetsAt: Date.parse("2026-10-23T16:00:00Z") / 1000 }
+    ]);
+    expect(parseClaudeAccountUsage(null)).toEqual([]);
+    expect(parseClaudeAccountUsage({ five_hour: { utilization: null } })).toEqual([]);
+  });
+
+  it("asks the account with Claude Code's saved login", async () => {
+    const fetchImpl = okFetch(BODY);
+    const now = () => new Date("2026-10-22T08:00:00Z");
+    const result = await readClaudeLiveUsage({
+      oauth: { accessToken: "tok", expiresAt: Date.parse("2026-10-22T09:00:00Z") },
+      fetchImpl,
+      now
+    });
+    expect(result?.windows.map((w) => w.usedPercent)).toEqual([24, 4]);
+    const [url, init] = (fetchImpl as unknown as { mock: { calls: [string, RequestInit][] } }).mock.calls[0]!;
+    expect(url).toBe("https://api.anthropic.com/api/oauth/usage");
+    expect((init.headers as Record<string, string>).Authorization).toBe("Bearer tok");
+  });
+
+  it("does not use an expired login, a failed request, or a missing login", async () => {
+    const now = () => new Date("2026-10-22T08:00:00Z");
+    const fetchImpl = okFetch(BODY);
+    expect(
+      await readClaudeLiveUsage({
+        oauth: { accessToken: "t", expiresAt: Date.parse("2026-10-22T07:59:00Z") },
+        fetchImpl,
+        now
+      })
+    ).toBeNull();
+    expect(fetchImpl).not.toHaveBeenCalled();
+    const failing = vi.fn(async () => new Response("no", { status: 401 })) as unknown as typeof fetch;
+    expect(await readClaudeLiveUsage({ oauth: { accessToken: "t" }, fetchImpl: failing, now })).toBeNull();
+    expect(await readClaudeLiveUsage({ oauth: null, fetchImpl, now })).toBeNull();
+  });
+
+  it("reads ~/.claude/.credentials.json for the desk and marks the result live", async () => {
+    const dir = await mkdtemp(join(tmpdir(), "argue-claude-live-"));
+    await writeFile(
+      join(dir, ".credentials.json"),
+      JSON.stringify({ claudeAiOauth: { accessToken: "tok", expiresAt: Date.now() + 3_600_000 } })
+    );
+    vi.stubGlobal("fetch", okFetch(BODY));
+    const env = { CLAUDE_CONFIG_DIR: dir, ARGUE_USAGE_FILE: join(dir, "usage.json") };
+    const usage = await readSeatUsage(["claude"], { env, liveClaude: true });
+    expect(usage.claude).toMatchObject({ kind: "limits", source: "claude", live: true });
+    expect(usage.claude?.kind === "limits" && usage.claude.windows[0]!.usedPercent).toBe(24);
+  });
+
+  it("shows unknown rather than 0% when every window of the last reading has reset", async () => {
+    const dir = await mkdtemp(join(tmpdir(), "argue-claude-stale-"));
+    const file = join(dir, "usage.json");
+    await recordClaudeRateLimit(CLAUDE_INFO, new Date(1792400000 * 1000), file);
+    const env = { ARGUE_USAGE_FILE: file, CLAUDE_CONFIG_DIR: join(dir, "none") };
+    const usage = await readSeatUsage(["claude"], { env, now: new Date(1792700000 * 1000), liveClaude: true });
+    expect(usage.claude).toMatchObject({ kind: "unknown", source: "claude" });
   });
 });
