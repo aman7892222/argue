@@ -36,6 +36,32 @@ describe("createTaskDelegate task lifecycle", () => {
     expect(second.error).toContain("unknown_task_id");
   });
 
+  it("does not leak an unhandled rejection when a task fails before awaitResult", async () => {
+    // A CLI that exits at once (e.g. "Not logged in") rejects before the engine awaits it;
+    // that used to crash the whole debate process with an unhandled rejection.
+    const loadedConfig = makeLoadedConfig({ delayMs: 0, behavior: "error" });
+    const plan = resolveRunPlan({
+      loadedConfig,
+      runInput: {},
+      overrides: { requestId: "req-early-fail", task: "topic" }
+    });
+    const unhandled: unknown[] = [];
+    const onUnhandled = (reason: unknown) => unhandled.push(reason);
+    process.on("unhandledRejection", onUnhandled);
+    try {
+      const delegate = await createTaskDelegate({ loadedConfig, plan });
+      const dispatch = await delegate.dispatch(
+        makeRoundTask({ requestId: "req-early-fail", sessionId: "s-early", participantId: "a1" })
+      );
+      await new Promise((resolve) => setTimeout(resolve, 20));
+      const result = await delegate.awaitResult(dispatch.taskId, 1000);
+      expect(result.ok).toBe(false);
+      expect(unhandled).toEqual([]);
+    } finally {
+      process.off("unhandledRejection", onUnhandled);
+    }
+  });
+
   it("cleans task record after cancel", async () => {
     const loadedConfig = makeLoadedConfig({ delayMs: 0 });
     const plan = resolveRunPlan({
@@ -225,7 +251,7 @@ function makeRoundTask(args: { requestId: string; sessionId: string; participant
   };
 }
 
-function makeLoadedConfig(options: { delayMs: number; timeoutMs?: number }) {
+function makeLoadedConfig(options: { delayMs: number; timeoutMs?: number; behavior?: "deterministic" | "error" }) {
   return {
     configPath: "/tmp/argue.config.json",
     configDir: "/tmp",
@@ -235,7 +261,7 @@ function makeLoadedConfig(options: { delayMs: number; timeoutMs?: number }) {
         mock1: {
           type: "mock" as const,
           defaultBehavior: {
-            behavior: "deterministic" as const,
+            behavior: options.behavior ?? ("deterministic" as const),
             delayMs: options.delayMs
           },
           models: {

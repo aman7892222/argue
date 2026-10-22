@@ -65,6 +65,10 @@ export async function createTaskDelegate(args: {
       const promise = runner
         .runTask({ task, agent, abortSignal: controller.signal })
         .then((result) => normalizeTaskOutput(task, result));
+      // A CLI can fail (e.g. "Not logged in") before awaitResult attaches a handler; without this
+      // Node treats that as an unhandled rejection and kills the whole debate. awaitResult still
+      // sees the rejection, since it awaits `promise` itself.
+      promise.catch(() => {});
 
       tasks.set(taskId, {
         controller,
