@@ -5,7 +5,10 @@ import { afterEach, describe, expect, it, vi } from "vitest";
 import { describeDrop } from "../src/drop-reason.js";
 import { CliExitError, explainCliFailure, parseClaudeStream } from "../src/runtime/cli.js";
 import {
+  agyWindowsFor,
   checkClaudeUsageNow,
+  parseAgyQuota,
+  readAgyQuota,
   parseClaudeAccountUsage,
   parseClaudeRateLimit,
   readClaudeLiveUsage,
@@ -328,5 +331,83 @@ describe("Claude live usage (account)", () => {
     expect(result).toEqual({ ok: true });
     const ledger = JSON.parse(await readFile(file, "utf8")) as { claude?: { windows: { usedPercent: number }[] } };
     expect(ledger.claude?.windows.map((w) => w.usedPercent)).toEqual([2, 41]);
+  });
+});
+
+describe("Antigravity quota (agy -p /usage)", () => {
+  const OUTPUT = [
+    "Quota:",
+    "Gemini Models          Weekly Limit Remaining       100%  2026-10-26 00:30 IST",
+    "Gemini Models          Five Hour Limit Remaining    100%  2026-10-22 19:07 IST",
+    "Claude and GPT models  Weekly Limit Remaining       43%   2026-10-25 23:31 IST",
+    "Claude and GPT models  Five Hour Limit Remaining    100%  2026-10-22 19:07 IST",
+    "Gemini 4 Argon         Gemini 4 Argon Weekly Limit  80%   2026-10-26 14:25 IST",
+    "PS C:\\Users\\amank>"
+  ].join("\r\n");
+  const local = (y: number, mo: number, d: number, h: number, mi: number) =>
+    new Date(y, mo - 1, d, h, mi).getTime() / 1000;
+
+  it("parses every row with local reset times", () => {
+    const rows = parseAgyQuota(OUTPUT);
+    expect(rows).toHaveLength(5);
+    expect(rows[0]).toEqual({
+      group: "Gemini Models",
+      limit: "Weekly Limit Remaining",
+      remainingPercent: 100,
+      resetsAt: local(2026, 10, 26, 0, 30)
+    });
+    expect(rows[4]).toMatchObject({
+      group: "Gemini 4 Argon",
+      remainingPercent: 80,
+      resetsAt: local(2026, 10, 26, 14, 25)
+    });
+    expect(parseAgyQuota("Usage of agy.exe:\n  --add-dir   Add a directory")).toEqual([]);
+  });
+
+  it("keeps the rows that limit the seat's model: 5-hour first, then the tightest week", () => {
+    const windows = agyWindowsFor(parseAgyQuota(OUTPUT), ["gemini-4-argon-high"]);
+    expect(windows.map((w) => [w.label, w.usedPercent])).toEqual([
+      ["5-hour", 0],
+      ["Gemini 4 Argon 7-day", 20],
+      ["7-day", 0]
+    ]);
+    const claudeOnAgy = agyWindowsFor(parseAgyQuota(OUTPUT), ["claude-sonnet-4-6"]);
+    expect(claudeOnAgy.map((w) => [w.label, w.usedPercent])).toEqual([
+      ["5-hour", 0],
+      ["7-day", 57]
+    ]);
+  });
+
+  it("runs agy and reads the table; the desk shows it as live limits", async () => {
+    const dir = await mkdtemp(join(tmpdir(), "argue-agy-"));
+    const script = join(dir, "fake-agy.mjs");
+    await writeFile(
+      script,
+      `if (process.argv.slice(2).join(" ") === "-p /usage") process.stdout.write(${JSON.stringify(OUTPUT)});`
+    );
+    const shim = join(dir, process.platform === "win32" ? "agy.cmd" : "agy");
+    await writeFile(
+      shim,
+      process.platform === "win32" ? `@node "${script}" %*\r\n` : `#!/bin/sh\nexec node "${script}" "$@"\n`,
+      { mode: 0o755 }
+    );
+    expect(await readAgyQuota({ command: shim })).toHaveLength(5);
+    const env = { ...process.env, ARGUE_USAGE_FILE: join(dir, "usage.json") };
+    const usage = await readSeatUsage(["antigravity"], {
+      env,
+      now: new Date(2026, 9, 22, 12, 0),
+      liveAntigravity: { command: shim, models: ["gemini-4-argon-high"] }
+    });
+    expect(usage.antigravity).toMatchObject({ kind: "limits", source: "antigravity", live: true });
+    expect(usage.antigravity?.kind === "limits" && usage.antigravity.windows[1]!.usedPercent).toBe(20);
+  });
+
+  it("falls back to argue's own token count when agy can't be read", async () => {
+    const dir = await mkdtemp(join(tmpdir(), "argue-agy-missing-"));
+    const usage = await readSeatUsage(["antigravity"], {
+      env: { ...process.env, ARGUE_USAGE_FILE: join(dir, "usage.json") },
+      liveAntigravity: { command: join(dir, "no-agy"), models: [] }
+    });
+    expect(usage.antigravity).toMatchObject({ kind: "tokens", source: "antigravity" });
   });
 });

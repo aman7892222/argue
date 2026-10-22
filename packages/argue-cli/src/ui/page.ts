@@ -2114,10 +2114,10 @@ main { max-width: none; padding: 0 40px 90px; display: flex; flex-direction: col
         pod.tip.appendChild(h("div", { class: "w" }, h("span", { text: w.label + " limit" }), h("span", { text: Math.round(100 - w.usedPercent) + "% left" }),
           h("small", { text: fmtReset(w.resetsAt) })));
       });
-      var from = u.live ? (u.source === "claude" ? "Checked with your Claude account" : "Checked with your Codex account") :
+      var from = u.live ? (u.source === "claude" ? "Checked with your Claude account" : u.source === "antigravity" ? "Read from Antigravity's /usage" : "Checked with your Codex account") :
         u.source === "claude" ? "Reported by Claude with its last answer" : "Read from Codex's own log";
       pod.tip.appendChild(h("div", { class: "muted", text: from + (u.observedAt ? ", " + fmtAgo(u.observedAt) : "") + ". Shared with everything else you use this plan for." +
-        (u.live ? " Refreshed every minute, every 15 seconds while a debate runs." :
+        (u.live ? (u.source === "antigravity" ? " Refreshed about once a minute." : " Refreshed every minute, every 15 seconds while a debate runs.") :
           u.source === "claude" ? (u.note ? "" : " Updates when Claude answers.") : " Refreshed every minute.") }));
       if (u.note) pod.tip.appendChild(h("div", { class: "muted", text: u.note }));
       if (u.canCheck) pod.tip.appendChild(checkButton());
@@ -2144,7 +2144,7 @@ main { max-width: none; padding: 0 40px 90px; display: flex; flex-direction: col
     }
   }
   function shortWindow(label) {
-    return label === "7-day" || label === "weekly" ? "week" : label === "5-hour" ? "5h" : label;
+    return /7-day$|weekly$/.test(label) ? "week" : /5-hour$/.test(label) ? "5h" : label;
   }
   // "Check now": one tiny Claude reply, which renews Claude Code's login and reports usage.
   function checkButton() {

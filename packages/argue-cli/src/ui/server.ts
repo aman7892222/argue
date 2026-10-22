@@ -291,17 +291,26 @@ export async function startUiServer(options: UiServerOptions = {}): Promise<UiSe
       const seats = new Map<string, string[]>();
       let codexCommand: string | undefined;
       let claudeCommand: string | undefined;
+      let agyCommand: string | undefined;
+      const agyModels: string[] = [];
       for (const agent of loaded.config.agents) {
         const provider = loaded.config.providers[agent.provider];
         if (provider?.type !== "cli") continue;
         seats.set(provider.cliType, [...(seats.get(provider.cliType) ?? []), agent.id]);
         if (provider.cliType === "codex") codexCommand ??= provider.command ?? "codex";
         if (provider.cliType === "claude") claudeCommand ??= provider.command ?? "claude";
+        if (provider.cliType === "antigravity") {
+          agyCommand ??= provider.command ?? "agy";
+          const picked = (loaded.config.desk?.seats as Record<string, { model?: string }> | undefined)?.[agent.id]
+            ?.model;
+          agyModels.push(agent.model, ...(picked ? [picked] : []));
+        }
       }
       // The page asks every minute (every 15 s while a debate runs). Codex's and Claude's limits
       // come live from their accounts (no prompt).
       const usage = await readSeatUsage([...seats.keys()], {
         liveClaude: { command: claudeCommand ?? "claude" },
+        ...(agyCommand ? { liveAntigravity: { command: agyCommand, models: agyModels } } : {}),
         ...(codexCommand ? { liveCodex: { command: codexCommand } } : {})
       });
       sendJson(res, 200, {

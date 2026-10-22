@@ -11,8 +11,8 @@ import spawn from "cross-spawn";
  *   a `rate_limit_event` with 5-hour / 7-day utilization, which argue keeps in a small ledger.
  * - codex: asked live from the account (`codex app-server`, no prompt) when the desk wants it;
  *   otherwise the newest `rate_limits` Codex wrote into its own session logs.
- * - antigravity: agy reports token counts but not its quota, so argue can only count the
- *   tokens it used itself (per local day).
+ * - antigravity: `agy -p "/usage"` prints the plan's quota table (no model turn); argue reads
+ *   the rows that apply to the seat's model. Failing that, it counts the tokens it used itself.
  */
 
 export type UsageWindow = {
@@ -25,7 +25,7 @@ export type UsageWindow = {
 export type SeatUsage =
   | {
       kind: "limits";
-      source: "claude" | "codex";
+      source: "claude" | "codex" | "antigravity";
       windows: UsageWindow[];
       observedAt: string | null;
       /** Read from the account just now, rather than from the CLI's last answer or log. */
@@ -492,8 +492,116 @@ function liveClaudeUsage(env: NodeJS.ProcessEnv, now: Date, command: string): Re
 /** Test hook: forget the cached live reads. */
 export function resetLiveUsageCache(): void {
   liveClaude = null;
+  liveAgy = null;
   claudeVersion = null;
   liveCodex = null;
+}
+
+/** One row of `agy -p "/usage"`: "Gemini Models   Weekly Limit Remaining   100%   2026-10-26 00:30 IST". */
+export type AgyQuotaRow = { group: string; limit: string; remainingPercent: number; resetsAt: number | null };
+
+/** Parses agy's quota table. Reset times are printed in this computer's local time. */
+export function parseAgyQuota(text: string): AgyQuotaRow[] {
+  const rows: AgyQuotaRow[] = [];
+  const pattern = /^(.+?)\s{2,}(.+?)\s{2,}(\d+(?:\.\d+)?)%(?:\s+(\d{4})-(\d{2})-(\d{2})[ T](\d{2}):(\d{2}))?/;
+  for (const raw of text.split(/\r?\n/)) {
+    const m = pattern.exec(raw.trim());
+    if (!m) continue;
+    const reset = m[4]
+      ? new Date(Number(m[4]), Number(m[5]) - 1, Number(m[6]), Number(m[7]), Number(m[8])).getTime() / 1000
+      : null;
+    rows.push({ group: m[1]!.trim(), limit: m[2]!.trim(), remainingPercent: Number(m[3]), resetsAt: reset });
+  }
+  return rows;
+}
+
+const norm = (s: string): string => s.toLowerCase().replace(/[^a-z0-9]/g, "");
+
+/** The rows that limit these models, as usage windows: 5-hour first, then the tightest weekly. */
+export function agyWindowsFor(rows: AgyQuotaRow[], models: string[]): UsageWindow[] {
+  const wanted = models.map(norm).filter(Boolean);
+  const applies = (group: string): boolean => {
+    if (!wanted.length) return true;
+    const g = norm(group);
+    if (g === "geminimodels") return wanted.some((m) => m.includes("gemini"));
+    if (g === "claudeandgptmodels") return wanted.some((m) => m.includes("claude") || m.includes("gpt"));
+    return wanted.some((m) => m.includes(g));
+  };
+  const windows = rows
+    .filter((r) => applies(r.group))
+    .map((r) => {
+      const weekly = /week/i.test(r.limit);
+      const fiveHour = /five hour|5[- ]?hour/i.test(r.limit);
+      const generic = /models$/i.test(r.group);
+      const span = weekly ? "7-day" : fiveHour ? "5-hour" : r.limit.replace(/\s*remaining$/i, "");
+      return {
+        label: generic && wanted.length ? span : `${r.group} ${span}`,
+        usedPercent: Math.max(0, Math.min(100, Math.round((100 - r.remainingPercent) * 10) / 10)),
+        resetsAt: r.resetsAt,
+        order: fiveHour ? 0 : weekly ? 1 : 2
+      };
+    });
+  windows.sort((a, b) => a.order - b.order || b.usedPercent - a.usedPercent);
+  return windows.map(({ order: _order, ...w }) => w);
+}
+
+/** Runs `agy -p "/usage"` (prints the quota table; no model turn). Null when agy is missing or slow. */
+export function readAgyQuota(
+  options: { command?: string; env?: NodeJS.ProcessEnv; timeoutMs?: number } = {}
+): Promise<AgyQuotaRow[] | null> {
+  return new Promise((resolve) => {
+    let child: ReturnType<typeof spawn>;
+    try {
+      child = spawn(options.command ?? "agy", ["-p", "/usage"], {
+        env: options.env ?? process.env,
+        stdio: ["ignore", "pipe", "ignore"],
+        windowsHide: true
+      });
+    } catch {
+      resolve(null);
+      return;
+    }
+    let out = "";
+    let settled = false;
+    const finish = (value: AgyQuotaRow[] | null): void => {
+      if (settled) return;
+      settled = true;
+      clearTimeout(timer);
+      resolve(value);
+    };
+    const timer = setTimeout(() => {
+      child.kill();
+      finish(null);
+    }, options.timeoutMs ?? 30_000);
+    child.stdout?.setEncoding("utf8");
+    child.stdout?.on("data", (d: string) => (out += d));
+    child.on("error", () => finish(null));
+    child.on("close", () => {
+      const rows = parseAgyQuota(out.slice(Math.max(0, out.lastIndexOf("Quota:"))));
+      finish(rows.length ? rows : null);
+    });
+  });
+}
+
+// agy takes a few seconds to start; one read serves the desk's requests for this long.
+const LIVE_AGY_MAX_AGE_MS = 50_000;
+let liveAgy: { at: number; command: string; read: Promise<{ rows: AgyQuotaRow[]; observedAt: string } | null> } | null =
+  null;
+
+function liveAgyQuota(
+  command: string,
+  env: NodeJS.ProcessEnv,
+  now: Date
+): Promise<{ rows: AgyQuotaRow[]; observedAt: string } | null> {
+  if (!liveAgy || liveAgy.command !== command || now.getTime() - liveAgy.at > LIVE_AGY_MAX_AGE_MS) {
+    const observedAt = now.toISOString();
+    liveAgy = {
+      at: now.getTime(),
+      command,
+      read: readAgyQuota({ command, env }).then((rows) => (rows ? { rows, observedAt } : null))
+    };
+  }
+  return liveAgy.read;
 }
 
 function findRateLimits(value: unknown, depth = 0): { primary?: CodexWindow; secondary?: CodexWindow } | null {
@@ -549,6 +657,8 @@ export async function readSeatUsage(
     liveCodex?: { command: string };
     /** Ask Claude's account for its current limits (the desk), with Claude Code's saved login. */
     liveClaude?: boolean | { command: string };
+    /** Read agy's quota table (the desk), with this command, for these models. */
+    liveAntigravity?: { command: string; models: string[] };
   } = {}
 ): Promise<Record<string, SeatUsage>> {
   const env = options.env ?? process.env;
@@ -603,6 +713,18 @@ export async function readSeatUsage(
           }
         : { kind: "unknown", source: "codex", reason: "No Codex session logs with rate limits found yet." };
     } else if (cliType === "antigravity") {
+      const quota = options.liveAntigravity ? await liveAgyQuota(options.liveAntigravity.command, env, now) : null;
+      const windows = quota ? agyWindowsFor(quota.rows, options.liveAntigravity?.models ?? []) : [];
+      if (quota && windows.length) {
+        out.antigravity = {
+          kind: "limits",
+          source: "antigravity",
+          windows: rollOver(windows, now),
+          observedAt: quota.observedAt,
+          live: true
+        };
+        continue;
+      }
       const today = localDate(now);
       const day = ledger.antigravity?.date === today ? ledger.antigravity : null;
       out.antigravity = {
