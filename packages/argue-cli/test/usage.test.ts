@@ -411,3 +411,31 @@ describe("Antigravity quota (agy -p /usage)", () => {
     expect(usage.antigravity).toMatchObject({ kind: "tokens", source: "antigravity" });
   });
 });
+
+describe("slow live reads", () => {
+  afterEach(() => resetLiveUsageCache());
+
+  it("answers within the deadline with the last known value, then the live one once agy answers", async () => {
+    const dir = await mkdtemp(join(tmpdir(), "argue-agy-slow-"));
+    const script = join(dir, "slow-agy.mjs");
+    await writeFile(
+      script,
+      `setTimeout(() => process.stdout.write("Quota:\\nGemini Models  Five Hour Limit Remaining  90%  2026-10-22 19:07 IST\\n"), 600);`
+    );
+    const shim = join(dir, process.platform === "win32" ? "agy.cmd" : "agy");
+    await writeFile(
+      shim,
+      process.platform === "win32" ? `@node "${script}" %*\r\n` : `#!/bin/sh\nexec node "${script}" "$@"\n`,
+      { mode: 0o755 }
+    );
+    const env = { ...process.env, ARGUE_USAGE_FILE: join(dir, "usage.json") };
+    const options = { env, liveAntigravity: { command: shim, models: ["gemini-x"] }, softDeadlineMs: 100 };
+    resetLiveUsageCache();
+    const first = await readSeatUsage(["antigravity"], options);
+    expect(first.antigravity).toMatchObject({ kind: "tokens", pending: true });
+    await new Promise((resolve) => setTimeout(resolve, 1500));
+    const second = await readSeatUsage(["antigravity"], options);
+    expect(second.antigravity).toMatchObject({ kind: "limits", live: true });
+    expect(second.antigravity?.pending).toBeUndefined();
+  });
+});

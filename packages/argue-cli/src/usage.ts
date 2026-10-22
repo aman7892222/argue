@@ -22,7 +22,7 @@ export type UsageWindow = {
   resetsAt: number | null;
 };
 
-export type SeatUsage =
+export type SeatUsage = (
   | {
       kind: "limits";
       source: "claude" | "codex" | "antigravity";
@@ -43,7 +43,30 @@ export type SeatUsage =
       calls: number;
       observedAt: string | null;
     }
-  | { kind: "unknown"; source: string; reason: string; canCheck?: boolean };
+  | { kind: "unknown"; source: string; reason: string; canCheck?: boolean }
+) & {
+  /** A live read is still running; this is the last known value. The desk asks again shortly. */
+  pending?: boolean;
+};
+
+const PENDING = Symbol("pending");
+/** Waits for a live read, but never longer than `ms`: a slow CLI must not hold up the page. */
+function soft<T>(promise: Promise<T>, ms: number): Promise<T | typeof PENDING> {
+  return new Promise((resolve) => {
+    const timer = setTimeout(() => resolve(PENDING), ms);
+    timer.unref?.();
+    promise.then(
+      (value) => {
+        clearTimeout(timer);
+        resolve(value);
+      },
+      () => {
+        clearTimeout(timer);
+        resolve(PENDING);
+      }
+    );
+  });
+}
 
 type Ledger = {
   version: 1;
@@ -493,6 +516,7 @@ function liveClaudeUsage(env: NodeJS.ProcessEnv, now: Date, command: string): Re
 export function resetLiveUsageCache(): void {
   liveClaude = null;
   liveAgy = null;
+  lastAgy = null;
   claudeVersion = null;
   liveCodex = null;
 }
@@ -585,6 +609,7 @@ export function readAgyQuota(
 
 // agy takes a few seconds to start; one read serves the desk's requests for this long.
 const LIVE_AGY_MAX_AGE_MS = 50_000;
+let lastAgy: { rows: AgyQuotaRow[]; observedAt: string } | null = null;
 let liveAgy: { at: number; command: string; read: Promise<{ rows: AgyQuotaRow[]; observedAt: string } | null> } | null =
   null;
 
@@ -598,7 +623,11 @@ function liveAgyQuota(
     liveAgy = {
       at: now.getTime(),
       command,
-      read: readAgyQuota({ command, env }).then((rows) => (rows ? { rows, observedAt } : null))
+      read: readAgyQuota({ command, env }).then((rows) => {
+        const value = rows ? { rows, observedAt } : null;
+        if (value) lastAgy = value;
+        return value;
+      })
     };
   }
   return liveAgy.read;
@@ -659,17 +688,22 @@ export async function readSeatUsage(
     liveClaude?: boolean | { command: string };
     /** Read agy's quota table (the desk), with this command, for these models. */
     liveAntigravity?: { command: string; models: string[] };
+    /** How long to wait for each live read before answering with the last known value. */
+    softDeadlineMs?: number;
   } = {}
 ): Promise<Record<string, SeatUsage>> {
   const env = options.env ?? process.env;
   const now = options.now ?? new Date();
   const ledger = await readLedger(usageLedgerPath(env));
   const out: Record<string, SeatUsage> = {};
+  const deadline = options.softDeadlineMs ?? 4_000;
 
   for (const cliType of new Set(cliTypes)) {
     if (cliType === "claude") {
       const command = typeof options.liveClaude === "object" ? options.liveClaude.command : "claude";
-      const live = options.liveClaude ? await liveClaudeUsage(env, now, command) : null;
+      const read = options.liveClaude ? await soft(liveClaudeUsage(env, now, command), deadline) : null;
+      const pending = read === PENDING;
+      const live = read === PENDING ? null : read;
       const note = live && "failure" in live ? claudeFailureText(live) : undefined;
       if (live && "windows" in live) {
         out.claude = {
@@ -685,7 +719,8 @@ export async function readSeatUsage(
           source: "claude",
           windows: rollOver(ledger.claude.windows, now),
           observedAt: ledger.claude.observedAt,
-          ...(note ? { note, canCheck: true } : {})
+          ...(note ? { note, canCheck: true } : {}),
+          ...(pending ? { pending: true } : {})
         };
       } else {
         // Every window in the last reading has reset since: showing 0% would be a guess.
@@ -694,14 +729,21 @@ export async function readSeatUsage(
           source: "claude",
           reason:
             note ??
-            (ledger.claude
-              ? "The last reading is from before your limits reset. It updates after Claude's next answer."
-              : "Shown after the Claude seat's first answer."),
-          ...(options.liveClaude ? { canCheck: true } : {})
+            (pending
+              ? "Checking your Claude account…"
+              : ledger.claude
+                ? "The last reading is from before your limits reset. It updates after Claude's next answer."
+                : "Shown after the Claude seat's first answer."),
+          ...(options.liveClaude && !pending ? { canCheck: true } : {}),
+          ...(pending ? { pending: true } : {})
         };
       }
     } else if (cliType === "codex") {
-      const live = options.liveCodex ? await liveCodexLimits(options.liveCodex.command, env, now) : null;
+      const read = options.liveCodex
+        ? await soft(liveCodexLimits(options.liveCodex.command, env, now), deadline)
+        : null;
+      const pending = read === PENDING;
+      const live = read === PENDING ? null : read;
       const codex = live ?? (await readCodexRateLimits(env));
       out.codex = codex
         ? {
@@ -709,11 +751,21 @@ export async function readSeatUsage(
             source: "codex",
             windows: rollOver(codex.windows, now),
             observedAt: codex.observedAt,
-            ...(live ? { live: true } : {})
+            ...(live ? { live: true } : {}),
+            ...(pending ? { pending: true } : {})
           }
-        : { kind: "unknown", source: "codex", reason: "No Codex session logs with rate limits found yet." };
+        : {
+            kind: "unknown",
+            source: "codex",
+            reason: pending ? "Checking your Codex account…" : "No Codex session logs with rate limits found yet.",
+            ...(pending ? { pending: true } : {})
+          };
     } else if (cliType === "antigravity") {
-      const quota = options.liveAntigravity ? await liveAgyQuota(options.liveAntigravity.command, env, now) : null;
+      const read = options.liveAntigravity
+        ? await soft(liveAgyQuota(options.liveAntigravity.command, env, now), deadline)
+        : null;
+      const pending = read === PENDING;
+      const quota = read === PENDING ? lastAgy : read;
       const windows = quota ? agyWindowsFor(quota.rows, options.liveAntigravity?.models ?? []) : [];
       if (quota && windows.length) {
         out.antigravity = {
@@ -721,7 +773,8 @@ export async function readSeatUsage(
           source: "antigravity",
           windows: rollOver(windows, now),
           observedAt: quota.observedAt,
-          live: true
+          live: true,
+          ...(pending ? { pending: true } : {})
         };
         continue;
       }
@@ -733,7 +786,8 @@ export async function readSeatUsage(
         date: today,
         totalTokens: day?.totalTokens ?? 0,
         calls: day?.calls ?? 0,
-        observedAt: day?.observedAt ?? null
+        observedAt: day?.observedAt ?? null,
+        ...(pending ? { pending: true } : {})
       };
     }
   }

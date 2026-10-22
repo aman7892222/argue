@@ -153,8 +153,10 @@ describe("ui server", () => {
       })
     );
 
+    // Never start this computer's real claude/agy or call real accounts from a test.
+    process.env.ARGUE_NO_LIVE_USAGE = "1";
     server = await startUiServer({ configPath });
-    const usage = (await call(server, "/api/usage")).body as {
+    const usage = (await call(server, "/api/usage").finally(() => delete process.env.ARGUE_NO_LIVE_USAGE)).body as {
       seats: Array<{ cliType: string; agents: string[]; usage: { kind: string } }>;
     };
     expect(usage.seats.map((s) => [s.cliType, s.agents, s.usage.kind])).toEqual([

@@ -308,11 +308,18 @@ export async function startUiServer(options: UiServerOptions = {}): Promise<UiSe
       }
       // The page asks every minute (every 15 s while a debate runs). Codex's and Claude's limits
       // come live from their accounts (no prompt).
-      const usage = await readSeatUsage([...seats.keys()], {
-        liveClaude: { command: claudeCommand ?? "claude" },
-        ...(agyCommand ? { liveAntigravity: { command: agyCommand, models: agyModels } } : {}),
-        ...(codexCommand ? { liveCodex: { command: codexCommand } } : {})
-      });
+      // ARGUE_NO_LIVE_USAGE=1 (tests): never start the real CLIs or call the accounts.
+      const live = process.env.ARGUE_NO_LIVE_USAGE !== "1";
+      const usage = await readSeatUsage(
+        [...seats.keys()],
+        !live
+          ? {}
+          : {
+              liveClaude: { command: claudeCommand ?? "claude" },
+              ...(agyCommand ? { liveAntigravity: { command: agyCommand, models: agyModels } } : {}),
+              ...(codexCommand ? { liveCodex: { command: codexCommand } } : {})
+            }
+      );
       sendJson(res, 200, {
         seats: [...seats.entries()].map(([cliType, agents]) => ({
           cliType,

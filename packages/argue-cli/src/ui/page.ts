@@ -2181,6 +2181,10 @@ main { max-width: none; padding: 0 40px 90px; display: flex; flex-direction: col
       });
       Object.keys(pods).forEach(function (k) { if (!seen[k]) { pods[k].el.remove(); delete pods[k]; } });
       if (!data.seats.length && !box.firstChild) box.appendChild(h("p", { class: "hint", text: "No CLI seats yet." }));
+      // A slow CLI (agy takes a few seconds to start) answered "still checking": ask again soon.
+      if (data.seats.some(function (seat) { return seat.usage.pending; }) && !state.usageRetry) {
+        state.usageRetry = setTimeout(function () { state.usageRetry = null; loadUsage(); }, 4000);
+      }
     }).catch(function () {});
   }
 
