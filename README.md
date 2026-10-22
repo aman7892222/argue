@@ -42,7 +42,9 @@ You only do this once. It takes about 10 minutes.
    npm run build
    ```
 4. **Install at least one AI CLI and sign in to it.** The desk uses your own subscriptions. Any of these works:
-   - Claude Code: `irm https://claude.ai/install.ps1 | iex` on Windows, or `curl -fsSL https://claude.ai/install.sh | bash` on Mac/Linux. Then run `claude auth login` once. The Claude Code CLI has its **own** credentials — signing in to the Claude Desktop app does not sign in the CLI, so this step is still needed if the desktop app is already installed.
+   - Claude Code: `irm https://claude.ai/install.ps1 | iex` on Windows, or `curl -fsSL https://claude.ai/install.sh | bash` on Mac/Linux. Then run `claude auth login` once and choose **Claude account with subscription**. The Claude Code CLI has its **own** credentials — signing in to the Claude Desktop app does not sign in the CLI, so this step is still needed if the desktop app is already installed.
+     - **"claude is not recognized" on Windows?** The installer puts it in `%USERPROFILE%\.local\bin`, which may not be on your PATH yet. Open a new PowerShell window, or run it by its full path: `& "$env:USERPROFILE\.local\bin\claude.exe" auth login`. The desk finds it there either way.
+     - **"Your organization has disabled Claude subscription access for Claude Code"?** The CLI is signed in to a different account than the one with your plan. Run `claude auth logout`, then `claude auth login` with the right account.
    - ChatGPT (Codex): `npm install -g @openai/codex`, then `codex login`.
    - Gemini (Antigravity): `winget install Google.AntigravityCLI` (Mac/Linux: see antigravity.google), then run `agy` once to sign in.
    - Local models, free and offline: [Ollama](https://ollama.com/download), then `ollama pull llama3.3`.
@@ -54,6 +56,7 @@ You only do this once. It takes about 10 minutes.
    ```
    (Adjust `../argue` if you cloned the project somewhere else.) Optionally, run `npm link -w packages/argue-cli` once inside the `argue` folder, and from then on just type `argue ui` in any folder.
 6. **In the page:** click **Scan for CLIs** and then **Add** next to each AI it finds. Type a question, optionally attach PDFs or images, and press **Start debate**.
+   - **Debate rounds** is how many rounds of cross-examination the seats get, at most (fewer if they agree early). An opening round, where each seat answers on its own, and a final vote are always added, so "Debate rounds 1" shows three steps: Opening proposals, Debate round 1, Final vote.
 
 **To update later:** go into the `argue` folder and run `git pull`, then `npm install`, then `npm run build`.
 
@@ -68,6 +71,18 @@ Each finished debate gets its own folder (by default `debates/` next to your `ar
 | `debate.json` | Everything needed to reopen the debate in the desk or run it again.                                                            |
 
 The PDF is made with Edge or Chrome, whichever your computer has. Without either, use `report.html` and its Print button. Debates, settings, logins and usage numbers stay on **your** computer and are never uploaded.
+
+### Plan usage
+
+The rings at the bottom of the sidebar show how much of each subscription is used. The big number is the shortest limit (usually the 5-hour session); the line under it is the week. Hover a ring for every limit and when it resets. They refresh every minute, and every 15 seconds while a debate runs.
+
+| Seat                 | Where the numbers come from                                                                                                                                                                                                                                                                            |
+| -------------------- | ------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------ |
+| Claude               | Your Claude account, using the login Claude Code saved (the same check as Claude Code's `/usage`; no message sent, no usage spent). If that login has expired, the ring says so and offers **Check now**, which sends Claude one tiny Haiku message so Claude Code renews its login and reports usage. |
+| ChatGPT (Codex)      | Your OpenAI account, through `codex app-server` (no message sent).                                                                                                                                                                                                                                     |
+| Gemini (Antigravity) | `agy -p "/usage"`, showing only the limits that apply to the seat's model. If agy can't be read, the ring shows the tokens argue itself used today.                                                                                                                                                    |
+
+A ring shows "—" with the reason when a number can't be read, rather than guessing. Usage numbers stay on your computer.
 
 ### Seats: any AI CLI
 

@@ -311,6 +311,7 @@ export function renderReportHtml(
     })
     .join("");
 
+  const debateRounds = (result.rounds ?? []).filter((r) => r.outputs?.[0]?.phase === "debate").length;
   const rounds = options.reasoning
     ? (result.rounds ?? [])
         .map((round) => {
@@ -338,7 +339,8 @@ export function renderReportHtml(
               return `<div class="lane" style="border-top-color:${themeOf(id)?.color ?? "#cfc8bb"}"><div class="lh">${chip(id)}</div>${out.summary ? `<p class="sum">${esc(out.summary)}</p>` : ""}${claims ? `<h4>Claims proposed</h4>${claims}` : ""}${judgements ? `<h4>How it judged the claims</h4>${judgements}` : ""}${votes ? `<h4>Votes</h4>${votes}` : ""}${out.fullResponse ? `<details><summary>Full answer</summary><div class="md">${mdToHtml(out.fullResponse)}</div></details>` : ""}</div>`;
             })
             .join("");
-          return `<details class="round"><summary><b>Round ${round.round} · ${name}</b></summary><div class="lanes">${lanes}</div></details>`;
+          const title = phase === "initial" || phase === "final_vote" ? name : `Debate round ${round.round} · ${name}`;
+          return `<details class="round"><summary><b>${esc(title)}</b></summary><div class="lanes">${lanes}</div></details>`;
         })
         .join("")
     : "";
@@ -392,7 +394,7 @@ ${options.reasoning ? `<div class="toolbar"><button onclick="document.querySelec
 <h1>${esc(title)}</h1>
 ${result.task?.title && result.task.prompt && result.task.prompt !== result.task.title ? `<p class="prompt">${esc(result.task.prompt)}</p>` : ""}
 <div class="chips"><span class="pill ${result.status === "consensus" ? "ok" : result.status === "failed" ? "no" : "rev"}">${esc(STATUS[result.status ?? ""] ?? result.status)}</span>${participants.map(chip).join("")}</div>
-<p class="meta">${esc(date)}${elapsed ? ` · ${esc(elapsed)}` : ""}${result.metrics?.totalRounds ? ` · ${result.metrics.totalRounds} rounds` : ""}</p>
+<p class="meta">${esc(date)}${elapsed ? ` · ${esc(elapsed)}` : ""}${debateRounds ? ` · ${debateRounds} debate round${debateRounds === 1 ? "" : "s"}` : ""}</p>
 ${attachments}
 <h2>Verdict</h2>
 <div class="card verdict ${esc(result.status)}"><p class="meta">Written by <b>${esc(result.representative?.participantId)}</b>, the top peer score</p>${result.report?.finalSummary ? `<p class="big">${esc(result.report.finalSummary)}</p>` : ""}${sources}${dropped}</div>

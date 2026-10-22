@@ -147,7 +147,7 @@ textarea:focus, select:focus, input[type=text]:focus { outline: none; border-col
 /* placed by script next to its button (fixed, so no card or dialog can clip it) */
 .dd-list { position: fixed; z-index: 80; width: max-content; max-width: min(320px, calc(100vw - 16px)); overflow-y: auto; padding: 4px;
   background: var(--panel); border: 1px solid var(--line); border-radius: 10px; box-shadow: var(--shadow-pop); }
-/* the composer's pill-shaped pickers: "Rounds 3", "Agree Everyone" */
+/* the composer's pill-shaped pickers: "Debate rounds 3", "Agree Everyone" */
 .dd.dd-pill .dd-btn { height: 32px; gap: 6px; padding: 0 30px 0 13px; border-radius: 999px; background-color: var(--field); background-position: right 12px center;
   font-size: 13px; }
 .dd-prefix { flex: none; color: var(--muted); font-size: 12.5px; font-weight: 600; }
@@ -968,7 +968,7 @@ main { max-width: none; padding: 0 40px 90px; display: flex; flex-direction: col
   // A select-only combobox (WAI-ARIA pattern): focus stays on it, the arrow keys move through
   // the list, Enter, Space or a click picks, and Escape, Tab or a click elsewhere closes it.
   // Options: label, items [{ value, text, detail, group }], value, placeholder (shown while the
-  // value is ""), prefix (a fixed word inside the button, as in "Rounds 3"), pill, onChange.
+  // value is ""), prefix (a fixed word inside the button, as in "Debate rounds 3"), pill, onChange.
   var openDropdown = null, dropdownCount = 0;
   function dropdown(o) {
     var id = "dd" + (++dropdownCount), items = [], value = "", active = -1;
@@ -1097,10 +1097,10 @@ main { max-width: none; padding: 0 40px 90px; display: flex; flex-direction: col
 
   // The composer's Rounds and Agree pickers: the same dropdown as the seats, so every list on
   // the desk follows the theme.
-  var roundsDd = dropdown({ label: "Rounds", prefix: "Rounds", pill: true, value: "3",
+  var roundsDd = dropdown({ label: "Debate rounds", prefix: "Debate rounds", pill: true, value: "3",
     items: [1, 2, 3, 4, 5].map(function (n) { return { value: String(n), text: String(n) }; }),
     onChange: function () { state.roundsTouched = true; } });
-  roundsDd.setTitle("How many rounds of cross-examination, at most");
+  roundsDd.setTitle("Rounds of cross-examination, at most (fewer if the seats agree early). An opening round and a final vote are always added.");
   var agreeDd = dropdown({ label: "Agree", prefix: "Agree", pill: true, value: "1",
     items: [
       { value: "1", text: "Everyone", detail: "Every seat must accept a claim" },
@@ -1634,6 +1634,14 @@ main { max-width: none; padding: 0 40px 90px; display: flex; flex-direction: col
     return c && c.title ? c.title : id;
   }
 
+  // The Debate rounds picker counts only cross-examination rounds; the opening and the final vote
+  // are always added, so they are named rather than numbered.
+  function roundTitle(r, name) {
+    return r.phase === "initial" || r.phase === "final_vote" ? name : "Debate round " + r.round + " · " + name;
+  }
+  function debateRoundCount(m) {
+    return m.roundOrder.filter(function (k) { return m.rounds[k] && m.rounds[k].phase === "debate"; }).length;
+  }
   function phaseName(r) {
     if (r.phase === "initial") return ["Opening proposals", "Each seat answers on its own, without seeing the others."];
     if (r.phase === "final_vote") return ["Final vote", "Each seat accepts or rejects every surviving claim."];
@@ -1672,7 +1680,7 @@ main { max-width: none; padding: 0 40px 90px; display: flex; flex-direction: col
           var out = m.eliminated[id] ? dropReason(m.eliminated[id].reason, m.eliminated[id].error) : null;
           return h("span", { class: "chip", title: seatUsedText(id) + (out ? " · " + out.label : "") }, mark(id), id, out ? (out.limit ? " (limit)" : " (out)") : "");
         }),
-        result && result.metrics ? h("span", { text: fmtElapsed(result.metrics.elapsedMs) + " · " + result.metrics.totalRounds + " rounds" }) : null,
+        result && result.metrics ? h("span", { text: fmtElapsed(result.metrics.elapsedMs) + " · " + debateRoundCount(m) + " debate round" + (debateRoundCount(m) === 1 ? "" : "s") }) : null,
         h("span", { text: fmtWhen(state.selected) })),
       running ? h("div", { class: "run-actions" }, h("button", { class: "btn danger small", onclick: stopRun }, icon("stop"), "Stop debate")) : null,
       result ? renderRunActions(c, result) : null));
@@ -1920,7 +1928,7 @@ main { max-width: none; padding: 0 40px 90px; display: flex; flex-direction: col
     if (r.merges.length) stats.push(r.merges.length + " merged");
     var wrap = h("details", { class: "round card", "data-key": key },
       h("summary", null,
-        h("span", { class: "round-title" }, h("b", { text: "Round " + r.round + " · " + name[0] }), h("span", { text: name[1] })),
+        h("span", { class: "round-title" }, h("b", { text: roundTitle(r, name[0]) }), h("span", { text: name[1] })),
         h("span", { class: "round-meta" }, chips, stats.length ? h("span", { class: "round-stats", text: stats.join("  ·  ") }) : null)));
     wrap.open = openDetails[key] === true;
     var lanes = h("div", { class: "lanes", style: "grid-template-columns: repeat(" + Math.max(1, r.participants.length) + ", minmax(0, 1fr))" });
