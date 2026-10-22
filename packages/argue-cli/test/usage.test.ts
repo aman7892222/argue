@@ -5,6 +5,7 @@ import { afterEach, describe, expect, it, vi } from "vitest";
 import { describeDrop } from "../src/drop-reason.js";
 import { CliExitError, explainCliFailure, parseClaudeStream } from "../src/runtime/cli.js";
 import {
+  checkClaudeUsageNow,
   parseClaudeAccountUsage,
   parseClaudeRateLimit,
   readClaudeLiveUsage,
@@ -211,6 +212,7 @@ describe("Claude live usage (account)", () => {
   };
   const okFetch = (body: unknown) =>
     vi.fn(async () => new Response(JSON.stringify(body), { status: 200 })) as unknown as typeof fetch;
+  const now = () => new Date("2026-10-22T08:00:00Z");
 
   afterEach(() => {
     vi.unstubAllGlobals();
@@ -226,34 +228,53 @@ describe("Claude live usage (account)", () => {
     expect(parseClaudeAccountUsage({ five_hour: { utilization: null } })).toEqual([]);
   });
 
-  it("asks the account with Claude Code's saved login", async () => {
+  it("asks the account with Claude Code's saved login and request identity", async () => {
     const fetchImpl = okFetch(BODY);
-    const now = () => new Date("2026-10-22T08:00:00Z");
     const result = await readClaudeLiveUsage({
       oauth: { accessToken: "tok", expiresAt: Date.parse("2026-10-22T09:00:00Z") },
       fetchImpl,
-      now
+      now,
+      version: "2.1.308"
     });
-    expect(result?.windows.map((w) => w.usedPercent)).toEqual([24, 4]);
+    expect("windows" in result && result.windows.map((w) => w.usedPercent)).toEqual([24, 4]);
     const [url, init] = (fetchImpl as unknown as { mock: { calls: [string, RequestInit][] } }).mock.calls[0]!;
     expect(url).toBe("https://api.anthropic.com/api/oauth/usage");
-    expect((init.headers as Record<string, string>).Authorization).toBe("Bearer tok");
+    const headers = init.headers as Record<string, string>;
+    expect(headers.Authorization).toBe("Bearer tok");
+    expect(headers["anthropic-beta"]).toBe("oauth-2025-04-20");
+    expect(headers["User-Agent"]).toBe("claude-cli/2.1.308 (external, cli)");
   });
 
-  it("does not use an expired login, a failed request, or a missing login", async () => {
-    const now = () => new Date("2026-10-22T08:00:00Z");
+  it("says why when it can't read: missing login, expired login, refused, offline", async () => {
     const fetchImpl = okFetch(BODY);
+    expect(await readClaudeLiveUsage({ oauth: null, fetchImpl, now })).toEqual({ failure: "no_login" });
     expect(
       await readClaudeLiveUsage({
         oauth: { accessToken: "t", expiresAt: Date.parse("2026-10-22T07:59:00Z") },
         fetchImpl,
         now
       })
-    ).toBeNull();
+    ).toEqual({ failure: "expired" });
     expect(fetchImpl).not.toHaveBeenCalled();
-    const failing = vi.fn(async () => new Response("no", { status: 401 })) as unknown as typeof fetch;
-    expect(await readClaudeLiveUsage({ oauth: { accessToken: "t" }, fetchImpl: failing, now })).toBeNull();
-    expect(await readClaudeLiveUsage({ oauth: null, fetchImpl, now })).toBeNull();
+    const status = (code: number) => vi.fn(async () => new Response("no", { status: code })) as unknown as typeof fetch;
+    expect(
+      await readClaudeLiveUsage({ oauth: { accessToken: "t" }, fetchImpl: status(401), now, version: "x" })
+    ).toEqual({
+      failure: "expired",
+      status: 401
+    });
+    expect(
+      await readClaudeLiveUsage({ oauth: { accessToken: "t" }, fetchImpl: status(403), now, version: "x" })
+    ).toEqual({
+      failure: "rejected",
+      status: 403
+    });
+    const offline = vi.fn(async () => {
+      throw new Error("ENOTFOUND");
+    }) as unknown as typeof fetch;
+    expect(await readClaudeLiveUsage({ oauth: { accessToken: "t" }, fetchImpl: offline, now, version: "x" })).toEqual({
+      failure: "unreachable"
+    });
   });
 
   it("reads ~/.claude/.credentials.json for the desk and marks the result live", async () => {
@@ -263,18 +284,49 @@ describe("Claude live usage (account)", () => {
       JSON.stringify({ claudeAiOauth: { accessToken: "tok", expiresAt: Date.now() + 3_600_000 } })
     );
     vi.stubGlobal("fetch", okFetch(BODY));
-    const env = { CLAUDE_CONFIG_DIR: dir, ARGUE_USAGE_FILE: join(dir, "usage.json") };
-    const usage = await readSeatUsage(["claude"], { env, liveClaude: true });
+    const env = { CLAUDE_CONFIG_DIR: dir, ARGUE_USAGE_FILE: join(dir, "usage.json"), PATH: "" };
+    const usage = await readSeatUsage(["claude"], { env, liveClaude: { command: join(dir, "no-claude") } });
     expect(usage.claude).toMatchObject({ kind: "limits", source: "claude", live: true });
     expect(usage.claude?.kind === "limits" && usage.claude.windows[0]!.usedPercent).toBe(24);
   });
 
-  it("shows unknown rather than 0% when every window of the last reading has reset", async () => {
+  it("explains an expired login and offers Check now instead of showing 0%", async () => {
     const dir = await mkdtemp(join(tmpdir(), "argue-claude-stale-"));
     const file = join(dir, "usage.json");
     await recordClaudeRateLimit(CLAUDE_INFO, new Date(1792400000 * 1000), file);
-    const env = { ARGUE_USAGE_FILE: file, CLAUDE_CONFIG_DIR: join(dir, "none") };
+    await writeFile(
+      join(dir, ".credentials.json"),
+      JSON.stringify({ claudeAiOauth: { accessToken: "t", expiresAt: 1 } })
+    );
+    const env = { ARGUE_USAGE_FILE: file, CLAUDE_CONFIG_DIR: dir };
     const usage = await readSeatUsage(["claude"], { env, now: new Date(1792700000 * 1000), liveClaude: true });
-    expect(usage.claude).toMatchObject({ kind: "unknown", source: "claude" });
+    expect(usage.claude).toMatchObject({ kind: "unknown", source: "claude", canCheck: true });
+    expect(usage.claude?.kind === "unknown" && usage.claude.reason).toMatch(/expired/);
+  });
+
+  it("Check now records the limits Claude reports with one tiny reply", async () => {
+    const dir = await mkdtemp(join(tmpdir(), "argue-claude-check-"));
+    const script = join(dir, "fake-claude.mjs");
+    await writeFile(
+      script,
+      [
+        "process.stdin.resume();",
+        "process.stdin.on('end', () => {",
+        `  console.log(JSON.stringify({ type: 'rate_limit_event', rate_limit_info: ${JSON.stringify(CLAUDE_INFO)} }));`,
+        "  console.log(JSON.stringify({ type: 'result', is_error: false, result: 'ok' }));",
+        "});"
+      ].join("\n")
+    );
+    const shim = join(dir, process.platform === "win32" ? "claude.cmd" : "claude");
+    await writeFile(
+      shim,
+      process.platform === "win32" ? `@node "${script}" %*\r\n` : `#!/bin/sh\nexec node "${script}" "$@"\n`,
+      { mode: 0o755 }
+    );
+    const file = join(dir, "usage.json");
+    const result = await checkClaudeUsageNow({ command: shim, env: { ...process.env, ARGUE_USAGE_FILE: file } });
+    expect(result).toEqual({ ok: true });
+    const ledger = JSON.parse(await readFile(file, "utf8")) as { claude?: { windows: { usedPercent: number }[] } };
+    expect(ledger.claude?.windows.map((w) => w.usedPercent)).toEqual([2, 41]);
   });
 });

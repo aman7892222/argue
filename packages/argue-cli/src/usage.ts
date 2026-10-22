@@ -30,6 +30,10 @@ export type SeatUsage =
       observedAt: string | null;
       /** Read from the account just now, rather than from the CLI's last answer or log. */
       live?: boolean;
+      /** Why the live read failed, when this came from the fallback instead. */
+      note?: string;
+      /** The desk can offer "Check now" (one tiny Claude reply) for this seat. */
+      canCheck?: boolean;
     }
   | {
       kind: "tokens";
@@ -39,7 +43,7 @@ export type SeatUsage =
       calls: number;
       observedAt: string | null;
     }
-  | { kind: "unknown"; source: string; reason: string };
+  | { kind: "unknown"; source: string; reason: string; canCheck?: boolean };
 
 type Ledger = {
   version: 1;
@@ -298,10 +302,36 @@ export function parseClaudeAccountUsage(body: unknown): UsageWindow[] {
   return out;
 }
 
+export type ClaudeLiveFailure = "no_login" | "expired" | "rejected" | "unreachable";
+export type ClaudeLiveResult =
+  | { windows: UsageWindow[]; observedAt: string }
+  | { failure: ClaudeLiveFailure; status?: number };
+
+let claudeVersion: Promise<string> | null = null;
+/** Claude Code's version, for the same request identity Claude Code itself sends. */
+function detectClaudeVersion(command: string, env: NodeJS.ProcessEnv): Promise<string> {
+  claudeVersion ??= new Promise((resolve) => {
+    let out = "";
+    try {
+      const child = spawn(command, ["--version"], { env, stdio: ["ignore", "pipe", "ignore"], windowsHide: true });
+      const timer = setTimeout(() => child.kill(), 5_000);
+      child.stdout?.on("data", (d: Buffer) => (out += d.toString()));
+      child.on("error", () => resolve("2.1.0"));
+      child.on("close", () => {
+        clearTimeout(timer);
+        resolve(/\d+\.\d+\.\d+/.exec(out)?.[0] ?? "2.1.0");
+      });
+    } catch {
+      resolve("2.1.0");
+    }
+  });
+  return claudeVersion;
+}
+
 /**
  * Claude's current limits straight from the account, using the login Claude Code saved: the
  * same request Claude Code's `/usage` makes. No prompt and no model turn. Read-only: an expired
- * login is left for Claude Code to refresh. Resolves null when anything is missing or fails.
+ * login is left for Claude Code to renew (it does whenever it runs). Says why when it can't.
  */
 export async function readClaudeLiveUsage(
   options: {
@@ -310,40 +340,146 @@ export async function readClaudeLiveUsage(
     timeoutMs?: number;
     fetchImpl?: typeof fetch;
     oauth?: ClaudeOAuth | null;
+    command?: string;
+    version?: string;
   } = {}
-): Promise<{ windows: UsageWindow[]; observedAt: string } | null> {
+): Promise<ClaudeLiveResult> {
   const now = options.now ?? (() => new Date());
+  const env = options.env ?? process.env;
+  let oauth: ClaudeOAuth | null;
   try {
-    const oauth = options.oauth !== undefined ? options.oauth : await readClaudeOAuth(options.env ?? process.env);
-    if (!oauth || typeof oauth.accessToken !== "string") return null;
-    if (typeof oauth.expiresAt === "number" && oauth.expiresAt <= now().getTime() + 30_000) return null;
+    oauth = options.oauth !== undefined ? options.oauth : await readClaudeOAuth(env);
+  } catch {
+    oauth = null;
+  }
+  if (!oauth || typeof oauth.accessToken !== "string") return { failure: "no_login" };
+  if (typeof oauth.expiresAt === "number" && oauth.expiresAt <= now().getTime() + 30_000) return { failure: "expired" };
+  try {
+    const version = options.version ?? (await detectClaudeVersion(options.command ?? "claude", env));
     const response = await (options.fetchImpl ?? fetch)("https://api.anthropic.com/api/oauth/usage", {
       headers: {
         Authorization: `Bearer ${oauth.accessToken}`,
         "anthropic-beta": "oauth-2025-04-20",
+        "User-Agent": `claude-cli/${version} (external, cli)`,
         Accept: "application/json"
       },
       signal: AbortSignal.timeout(options.timeoutMs ?? 8_000)
     });
-    if (!response.ok) return null;
+    if (!response.ok) return { failure: response.status === 401 ? "expired" : "rejected", status: response.status };
     const windows = parseClaudeAccountUsage(await response.json());
-    return windows.length ? { windows, observedAt: now().toISOString() } : null;
+    return windows.length
+      ? { windows, observedAt: now().toISOString() }
+      : { failure: "rejected", status: response.status };
   } catch {
-    return null;
+    return { failure: "unreachable" };
   }
+}
+
+export function claudeFailureText(result: { failure: ClaudeLiveFailure; status?: number }): string {
+  switch (result.failure) {
+    case "no_login":
+      return "Claude Code isn't signed in on this computer (no saved login found). Run claude auth login once.";
+    case "expired":
+      return "Claude Code's saved login has expired. Claude Code renews it whenever it runs: click Check now, or it updates after Claude's next answer.";
+    case "rejected":
+      return `Your Claude account didn't answer the usage check (HTTP ${result.status ?? "?"}). Click Check now, or it updates after Claude's next answer.`;
+    default:
+      return "Couldn't reach Claude's servers to check usage. It updates after Claude's next answer.";
+  }
+}
+
+/**
+ * "Check now": one tiny Claude reply (Haiku, no tools). Running Claude Code renews its own saved
+ * login, and the reply reports the plan's rate limits, which go into the ledger. Uses a sliver of
+ * the plan, so the desk only does this when asked.
+ */
+export function checkClaudeUsageNow(
+  options: { command?: string; env?: NodeJS.ProcessEnv; timeoutMs?: number } = {}
+): Promise<{ ok: boolean; message?: string }> {
+  return new Promise((resolve) => {
+    let child: ReturnType<typeof spawn>;
+    try {
+      child = spawn(
+        options.command ?? "claude",
+        [
+          "-p",
+          "--output-format",
+          "stream-json",
+          "--verbose",
+          "--model",
+          "haiku",
+          "--max-turns",
+          "1",
+          "--tools",
+          "",
+          "--strict-mcp-config",
+          "--disable-slash-commands"
+        ],
+        { env: options.env ?? process.env, stdio: ["pipe", "pipe", "pipe"], windowsHide: true }
+      );
+    } catch {
+      resolve({ ok: false, message: "Couldn't start Claude Code." });
+      return;
+    }
+    let stdout = "";
+    let stderr = "";
+    let settled = false;
+    const timer = setTimeout(() => child.kill(), options.timeoutMs ?? 60_000);
+    child.stdout?.on("data", (d: Buffer) => (stdout += d.toString()));
+    child.stderr?.on("data", (d: Buffer) => (stderr += d.toString()));
+    child.stdin?.on("error", () => undefined);
+    child.on("error", () => {
+      clearTimeout(timer);
+      if (!settled) {
+        settled = true;
+        resolve({ ok: false, message: "Couldn't start Claude Code." });
+      }
+    });
+    child.on("close", () => {
+      clearTimeout(timer);
+      if (settled) return;
+      settled = true;
+      let info: unknown = null;
+      let result = "";
+      for (const line of stdout.split(/\r?\n/)) {
+        if (!line.startsWith("{")) continue;
+        try {
+          const event = JSON.parse(line) as { type?: string; rate_limit_info?: unknown; result?: unknown };
+          if (event.type === "rate_limit_event") info = event.rate_limit_info;
+          if (event.type === "result" && typeof event.result === "string") result = event.result;
+        } catch {
+          // partial line
+        }
+      }
+      liveClaude = null; // the login may have been renewed: read the account again next time
+      const ledgerPath = usageLedgerPath(options.env ?? process.env);
+      const done = info ? recordClaudeRateLimit(info, new Date(), ledgerPath) : Promise.resolve();
+      void done.then(() =>
+        resolve(
+          info
+            ? { ok: true }
+            : {
+                ok: false,
+                message: (result || stderr).trim().split(/\r?\n/)[0]?.slice(0, 200) || "Claude didn't report usage."
+              }
+        )
+      );
+    });
+    child.stdin?.end("Reply with just: ok");
+  });
 }
 
 // The desk asks often while a debate runs; one live read serves every request inside this time.
 const LIVE_CLAUDE_MAX_AGE_MS = 10_000;
 let liveClaude: { at: number; read: ReturnType<typeof readClaudeLiveUsage> } | null = null;
 
-function liveClaudeUsage(env: NodeJS.ProcessEnv, now: Date): ReturnType<typeof readClaudeLiveUsage> {
+function liveClaudeUsage(env: NodeJS.ProcessEnv, now: Date, command: string): ReturnType<typeof readClaudeLiveUsage> {
   if (!liveClaude || now.getTime() - liveClaude.at > LIVE_CLAUDE_MAX_AGE_MS) {
-    const read = readClaudeLiveUsage({ env });
+    const read = readClaudeLiveUsage({ env, command });
     liveClaude = { at: now.getTime(), read };
     // Keep the ledger current too, so a later offline read starts from this.
     void read.then((r) => {
-      if (r)
+      if ("windows" in r)
         void updateLedger(
           (ledger) => (ledger.claude = { windows: r.windows, observedAt: r.observedAt }),
           usageLedgerPath(env)
@@ -356,6 +492,7 @@ function liveClaudeUsage(env: NodeJS.ProcessEnv, now: Date): ReturnType<typeof r
 /** Test hook: forget the cached live reads. */
 export function resetLiveUsageCache(): void {
   liveClaude = null;
+  claudeVersion = null;
   liveCodex = null;
 }
 
@@ -411,7 +548,7 @@ export async function readSeatUsage(
     /** Ask Codex's account for its current limits (the desk), with this command. */
     liveCodex?: { command: string };
     /** Ask Claude's account for its current limits (the desk), with Claude Code's saved login. */
-    liveClaude?: boolean;
+    liveClaude?: boolean | { command: string };
   } = {}
 ): Promise<Record<string, SeatUsage>> {
   const env = options.env ?? process.env;
@@ -421,8 +558,10 @@ export async function readSeatUsage(
 
   for (const cliType of new Set(cliTypes)) {
     if (cliType === "claude") {
-      const live = options.liveClaude ? await liveClaudeUsage(env, now) : null;
-      if (live) {
+      const command = typeof options.liveClaude === "object" ? options.liveClaude.command : "claude";
+      const live = options.liveClaude ? await liveClaudeUsage(env, now, command) : null;
+      const note = live && "failure" in live ? claudeFailureText(live) : undefined;
+      if (live && "windows" in live) {
         out.claude = {
           kind: "limits",
           source: "claude",
@@ -435,16 +574,20 @@ export async function readSeatUsage(
           kind: "limits",
           source: "claude",
           windows: rollOver(ledger.claude.windows, now),
-          observedAt: ledger.claude.observedAt
+          observedAt: ledger.claude.observedAt,
+          ...(note ? { note, canCheck: true } : {})
         };
       } else {
         // Every window in the last reading has reset since: showing 0% would be a guess.
         out.claude = {
           kind: "unknown",
           source: "claude",
-          reason: ledger.claude
-            ? "The last reading is from before your limits reset. Shown again when Claude answers, or once Claude Code is signed in on this computer."
-            : "Shown after the Claude seat's first answer, or once Claude Code is signed in on this computer."
+          reason:
+            note ??
+            (ledger.claude
+              ? "The last reading is from before your limits reset. It updates after Claude's next answer."
+              : "Shown after the Claude seat's first answer."),
+          ...(options.liveClaude ? { canCheck: true } : {})
         };
       }
     } else if (cliType === "codex") {

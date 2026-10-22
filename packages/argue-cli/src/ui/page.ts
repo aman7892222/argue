@@ -101,11 +101,15 @@ main { padding: 34px 44px 90px; min-width: 0; max-width: 1180px; }
 .pod .glyph { font: 600 17px/1 var(--sans); }
 .pod .num { font: 650 14px/1.2 var(--sans); margin-top: 4px; font-variant-numeric: tabular-nums; }
 .pod .num small { font-weight: 500; color: var(--muted); font-size: 11px; }
+.pod .sub { font-size: 11px; color: var(--muted); font-variant-numeric: tabular-nums; white-space: nowrap; }
+.pod .sub:empty { display: none; }
+.pod .tip .check { margin-top: 8px; }
 .pod .who { font-size: 11.5px; color: var(--muted); max-width: 96px; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
 .pod .tip { display: none; position: absolute; top: calc(100% - 2px); left: 50%; transform: translateX(-50%); z-index: 30; width: 268px; padding: 12px 14px;
   background: var(--panel); border: 1px solid var(--line); border-radius: 12px; box-shadow: var(--shadow-pop); font-size: 12.5px; line-height: 1.55; text-align: left; }
 .pod:first-child .tip { left: 0; transform: none; }
 .pod:last-child .tip { left: auto; right: 0; transform: none; }
+.pod:only-child .tip { left: 0; right: auto; transform: none; }
 .pod:hover .tip { display: block; }
 .tip b { display: block; font: 600 14px/1.3 var(--serif); margin-bottom: 6px; }
 .tip .w { display: grid; grid-template-columns: 1fr auto; gap: 2px 8px; padding: 5px 0; border-top: 1px solid var(--soft); }
@@ -386,6 +390,7 @@ aside.sidebar { padding: 18px 14px 14px; gap: 0; background: var(--aside-bg); }
 .side-bottom .usage { margin: 0; }
 .side-bottom .pod svg.ring { width: 46px; height: 46px; }
 .side-bottom .pod .num { font-size: 12.5px; margin-top: 2px; }
+.side-bottom .pod .sub { font-size: 10.5px; }
 .side-bottom .pod .tip { top: auto; bottom: calc(100% - 4px); }
 details.library { border-radius: 12px; padding: 4px 6px; }
 details.library > summary { list-style: none; display: flex; align-items: baseline; gap: 8px; cursor: pointer; padding: 4px 0; color: var(--ink2); }
@@ -2085,15 +2090,17 @@ main { max-width: none; padding: 0 40px 90px; display: flex; flex-direction: col
       glyph.textContent = t.glyph;
     }
     var num = h("span", { class: "num" });
+    var sub = h("span", { class: "sub" });
     var who = h("span", { class: "who" });
     var tip = h("div", { class: "tip" });
-    var el = h("div", { class: "pod", tabindex: "0" }, svg("svg", { class: "ring", viewBox: "0 0 60 60" }, defs, track, fill, orbit, glyph), num, who, tip);
-    return { el: el, fill: fill, orbit: orbit, glyph: glyph, num: num, who: who, tip: tip, theme: t };
+    var el = h("div", { class: "pod", tabindex: "0" }, svg("svg", { class: "ring", viewBox: "0 0 60 60" }, defs, track, fill, orbit, glyph), num, sub, who, tip);
+    return { el: el, fill: fill, orbit: orbit, glyph: glyph, num: num, sub: sub, who: who, tip: tip, theme: t };
   }
   function updatePod(pod, seat) {
     var u = seat.usage; var t = pod.theme;
     pod.who.textContent = seat.agents.join(", ");
     pod.tip.textContent = "";
+    pod.sub.textContent = "";
     pod.tip.appendChild(h("b", { text: t.name }));
     var pct = null;
     if (u.kind === "limits") {
@@ -2101,6 +2108,8 @@ main { max-width: none; padding: 0 40px 90px; display: flex; flex-direction: col
       pct = u.windows.length ? u.windows[0].usedPercent : 0;
       pod.num.textContent = Math.round(pct) + "%";
       pod.num.appendChild(h("small", { text: " used" }));
+      // The other window (the week, for Claude and Codex) right under the ring, not only on hover.
+      if (u.windows.length > 1) pod.sub.textContent = shortWindow(u.windows[1].label) + " " + Math.round(u.windows[1].usedPercent) + "%";
       u.windows.forEach(function (w) {
         pod.tip.appendChild(h("div", { class: "w" }, h("span", { text: w.label + " limit" }), h("span", { text: Math.round(100 - w.usedPercent) + "% left" }),
           h("small", { text: fmtReset(w.resetsAt) })));
@@ -2109,15 +2118,20 @@ main { max-width: none; padding: 0 40px 90px; display: flex; flex-direction: col
         u.source === "claude" ? "Reported by Claude with its last answer" : "Read from Codex's own log";
       pod.tip.appendChild(h("div", { class: "muted", text: from + (u.observedAt ? ", " + fmtAgo(u.observedAt) : "") + ". Shared with everything else you use this plan for." +
         (u.live ? " Refreshed every minute, every 15 seconds while a debate runs." :
-          u.source === "claude" ? " Couldn't reach your Claude account, so this updates when Claude answers." : " Refreshed every minute.") }));
+          u.source === "claude" ? (u.note ? "" : " Updates when Claude answers.") : " Refreshed every minute.") }));
+      if (u.note) pod.tip.appendChild(h("div", { class: "muted", text: u.note }));
+      if (u.canCheck) pod.tip.appendChild(checkButton());
     } else if (u.kind === "tokens") {
       pod.num.textContent = fmtTokens(u.totalTokens);
       pod.num.appendChild(h("small", { text: " tokens" }));
+      pod.sub.textContent = "used today";
       pod.tip.appendChild(h("div", { text: "argue used " + u.totalTokens.toLocaleString() + " tokens today across " + u.calls + " call" + (u.calls === 1 ? "" : "s") + "." }));
       pod.tip.appendChild(h("div", { class: "muted", text: "Antigravity only shows its quota inside the Antigravity app (model picker). It doesn't share it with command-line tools, so there's no % ring here. This quota is separate from the Gemini app's daily limit." }));
     } else {
       pod.num.textContent = "—";
+      if (u.canCheck) pod.sub.textContent = "not checked";
       pod.tip.appendChild(h("div", { class: "muted", text: u.reason }));
+      if (u.canCheck) pod.tip.appendChild(checkButton());
     }
     pod.orbit.style.display = pct === null ? "" : "none";
     if (pct !== null) {
@@ -2128,6 +2142,21 @@ main { max-width: none; padding: 0 40px 90px; display: flex; flex-direction: col
     } else {
       pod.fill.setAttribute("stroke-dashoffset", String(C));
     }
+  }
+  function shortWindow(label) {
+    return label === "7-day" || label === "weekly" ? "week" : label === "5-hour" ? "5h" : label;
+  }
+  // "Check now": one tiny Claude reply, which renews Claude Code's login and reports usage.
+  function checkButton() {
+    var btn = h("button", { class: "btn ghost small check", type: "button", title: "Sends Claude one tiny Haiku message. Uses a sliver of your plan." }, "Check now");
+    btn.addEventListener("click", function () {
+      btn.disabled = true; btn.textContent = "Checking…";
+      api("/api/usage/claude/check", { method: "POST" }).then(function (r) {
+        if (!r.ok) notify("Claude usage: " + (r.message || "no answer"), "error");
+        return loadUsage();
+      }).catch(function (e) { notify(e.message, "error"); btn.disabled = false; btn.textContent = "Check now"; });
+    });
+    return btn;
   }
   function loadUsage() {
     if (state.closed) return Promise.resolve();

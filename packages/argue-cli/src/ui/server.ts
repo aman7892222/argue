@@ -19,7 +19,7 @@ import {
   withCachedListings,
   type DetectedCli
 } from "../cli-catalog.js";
-import { readSeatUsage } from "../usage.js";
+import { checkClaudeUsageNow, readSeatUsage } from "../usage.js";
 import { addSeat, parseAddSeatRequest, parseSeatPick, removeSeat, saveSeatPick, updateConfig } from "./seats.js";
 import {
   chooseFolderDialog,
@@ -277,21 +277,31 @@ export async function startUiServer(options: UiServerOptions = {}): Promise<UiSe
       return;
     }
 
+    if (req.method === "POST" && url.pathname === "/api/usage/claude/check") {
+      const loaded = await loadConfig();
+      const provider = Object.values(loaded.config.providers).find((p) => p.type === "cli" && p.cliType === "claude");
+      const command = provider?.type === "cli" ? (provider.command ?? "claude") : "claude";
+      sendJson(res, 200, await checkClaudeUsageNow({ command }));
+      return;
+    }
+
     if (req.method === "GET" && url.pathname === "/api/usage") {
       const loaded = await loadConfig();
       // One entry per CLI kind, listing the agents that draw on that subscription.
       const seats = new Map<string, string[]>();
       let codexCommand: string | undefined;
+      let claudeCommand: string | undefined;
       for (const agent of loaded.config.agents) {
         const provider = loaded.config.providers[agent.provider];
         if (provider?.type !== "cli") continue;
         seats.set(provider.cliType, [...(seats.get(provider.cliType) ?? []), agent.id]);
         if (provider.cliType === "codex") codexCommand ??= provider.command ?? "codex";
+        if (provider.cliType === "claude") claudeCommand ??= provider.command ?? "claude";
       }
       // The page asks every minute (every 15 s while a debate runs). Codex's and Claude's limits
       // come live from their accounts (no prompt).
       const usage = await readSeatUsage([...seats.keys()], {
-        liveClaude: true,
+        liveClaude: { command: claudeCommand ?? "claude" },
         ...(codexCommand ? { liveCodex: { command: codexCommand } } : {})
       });
       sendJson(res, 200, {
