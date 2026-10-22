@@ -1199,7 +1199,7 @@ main { max-width: none; padding: 0 40px 90px; display: flex; flex-direction: col
     // Prefer the compact "Not logged in" style line if present; otherwise the first line of error.
     var short = "";
     var authMatch = err.match(/Not logged in[^\n"]*/);
-    if (authMatch) short = authMatch[0];
+    if (authMatch) short = authMatch[0].replace(/\s+(stdout|stderr)=.*$/, "");
     else if (err) short = err.split("\n")[0].slice(0, 200);
     var looksAuth = /not logged in|please run \/login|authentication_failed|unauthoriz/i.test(err);
     var a = agentInfo(el.participantId);
