@@ -1,4 +1,5 @@
 import { mkdtemp, readFile, writeFile } from "node:fs/promises";
+import { realpathSync } from "node:fs";
 import { tmpdir } from "node:os";
 import { join } from "node:path";
 import { describe, expect, it } from "vitest";
@@ -123,7 +124,9 @@ describe("attachments", () => {
   });
 
   it("gives Claude Read only (inside the attachments folder) and Codex the images", async () => {
-    const dir = await mkdtemp(join(tmpdir(), "argue-attach-run-"));
+    // On macOS os.tmpdir() returns "/var/..." but process.cwd() inside the child subprocess
+    // resolves to the "/private/var/..." symlink target, so normalize before comparing.
+    const dir = realpathSync(await mkdtemp(join(tmpdir(), "argue-attach-run-")));
     const png = join(dir, "chart.png");
     await writeFile(png, "png");
     const script = join(dir, "echo.mjs");

@@ -1681,7 +1681,7 @@ main { max-width: none; padding: 0 40px 90px; display: flex; flex-direction: col
     // Results first; the debate itself stays folded until opened.
     if (result) {
       main.appendChild(renderClaims(result, m));
-      main.appendChild(renderScores(result));
+      main.appendChild(renderScores(result, m));
     }
 
     var tl = h("div", { class: "section" },
@@ -1718,15 +1718,22 @@ main { max-width: none; padding: 0 40px 90px; display: flex; flex-direction: col
     bar.appendChild(h("button", { class: "btn ghost small", onclick: function () { runAgain(result); } }, icon("again"), "Run again"));
     return bar;
   }
-  // Puts the same question and seats back in the form so the debate can be rerun or tweaked.
+  // Puts the same question and seats back in the form, then dispatches the debate when the form
+  // is fully recoverable. If any seat from the saved debate is no longer set up, we stop at the
+  // form (same message as before) so the user can pick replacements before running.
   function runAgain(result) {
     var prompt = result.task && result.task.prompt ? result.task.prompt : "";
     showComposer();
-    document.getElementById("task").value = stripAttachmentNote(prompt);
+    var taskEl = document.getElementById("task");
+    taskEl.value = stripAttachmentNote(prompt);
     growTask();
     var ids = (result.scoreboard || []).map(function (s) { return s.participantId; });
     [].forEach.call(document.querySelectorAll("#seats input[type=checkbox]"), function (cb) { cb.checked = ids.indexOf(cb.value) >= 0; });
-    showFormError(ids.some(function (sid) { return !agentInfo(sid); }) ? "Some seats from that debate are no longer set up; pick others." : "");
+    var missing = ids.some(function (sid) { return !agentInfo(sid); });
+    showFormError(missing ? "Some seats from that debate are no longer set up; pick others." : "");
+    if (!missing && taskEl.value.trim() && ids.length >= 2) {
+      document.getElementById("start").click();
+    }
   }
 
   // ---------- composer niceties ----------
@@ -1890,9 +1897,47 @@ main { max-width: none; padding: 0 40px 90px; display: flex; flex-direction: col
         var known = m.eliminated[el.participantId] || {};
         var drop = dropReason(el.reason, el.error || known.error);
         card.appendChild(h("p", { class: "rationale" }, h("b", { text: el.participantId }), " in round " + el.round + ": " + drop.label + (drop.limit && drop.text ? " — " + drop.text : "")));
+        if (!drop.limit) {
+          // PR #1: the actual error line plus a sign-in hint when the CLI isn't logged in.
+          var detail = eliminationDetail(enrichElimination(el, m));
+          if (detail.message) card.appendChild(h("p", { class: "rationale", style: "margin-top:-6px;color:var(--disagree)", text: detail.message }));
+          if (detail.hint) card.appendChild(h("p", { class: "rationale", style: "margin-top:-6px", text: detail.hint }));
+        }
       });
     }
     return h("div", { class: "section", style: "margin-top:0" }, h("h3", { text: "Verdict" }), card);
+  }
+
+  // Older saved results don't carry the per-elimination error string; recover it from the live
+  // event-stream model when we have one so the auth hint still shows up on re-opened debates.
+  function enrichElimination(el, m) {
+    if (el && el.error) return el;
+    var live = m && m.eliminated ? m.eliminated[el.participantId] : null;
+    if (live && live.error) return { participantId: el.participantId, round: el.round, reason: el.reason, at: el.at, error: live.error };
+    return el;
+  }
+
+  // Extract a short error line and a cliType-specific remediation hint for a dropped seat.
+  function eliminationDetail(el) {
+    var err = typeof el.error === "string" ? el.error : "";
+    // Prefer the compact "Not logged in" style line if present; otherwise the first line of error.
+    var short = "";
+    var authMatch = err.match(/Not logged in[^\n"]*/);
+    if (authMatch) short = authMatch[0].replace(/\s+(stdout|stderr)=.*$/, "");
+    else if (err) short = err.split("\n")[0].slice(0, 200);
+    var looksAuth = /not logged in|please run \/login|authentication_failed|unauthoriz/i.test(err);
+    var a = agentInfo(el.participantId);
+    var cliType = a && a.cliType ? a.cliType : "";
+    var hint = "";
+    if (looksAuth) {
+      if (cliType === "claude") hint = "Sign in once with: claude auth login";
+      else if (cliType === "codex") hint = "Sign in once with: codex login";
+      else if (cliType === "antigravity") hint = "Sign in once by running: agy";
+      else if (cliType === "gemini") hint = "Sign in once by running: gemini";
+      else if (cliType) hint = "Sign in to " + cliType + " and try again.";
+      else hint = "The CLI reports it is not signed in. Sign in and try again.";
+    }
+    return { message: short, hint: hint };
   }
 
   function renderRound(r, m, openDetails) {
@@ -2014,21 +2059,52 @@ main { max-width: none; padding: 0 40px 90px; display: flex; flex-direction: col
     return h("div", { class: "section" }, h("h3", { text: "Claims and how they were resolved" }), h("div", { class: "card" }, table));
   }
 
-  function renderScores(result) {
+  function renderScores(result, m) {
     var LABELS = { correctness: "Correctness", completeness: "Completeness", actionability: "Actionability", consistency: "Consistency" };
-    var ranked = (result.scoreboard || []).slice().sort(function (a, b) { return b.total - a.total; });
+    var elim = {};
+    (result.eliminations || []).forEach(function (el) { elim[el.participantId] = enrichElimination(el, m); });
+    // Rank non-eliminated seats first (preserves the "crown" semantics when a seat scored 0 but was eliminated).
+    var ranked = (result.scoreboard || []).slice().sort(function (a, b) {
+      var ae = elim[a.participantId] ? 1 : 0;
+      var be = elim[b.participantId] ? 1 : 0;
+      if (ae !== be) return ae - be;
+      return b.total - a.total;
+    });
+    var topLive = ranked.find ? ranked.find(function (s) { return !elim[s.participantId]; }) : null;
+    if (!topLive) {
+      // ES5 fallback for find.
+      for (var ri = 0; ri < ranked.length; ri++) { if (!elim[ranked[ri].participantId]) { topLive = ranked[ri]; break; } }
+    }
     var grid = h("div", { class: "grid3" });
-    ranked.forEach(function (s, i) {
-      var card = h("div", { class: "card score", style: themeVars(themeFor(s.participantId)) },
-        h("div", { class: "score-total" }, h("b", { text: s.total.toFixed(1) }), mark(s.participantId), h("span", { style: "font-weight:650", text: s.participantId }),
-          i === 0 ? h("span", { class: "crown", text: "wrote the report" }) : null));
-      Object.keys(LABELS).forEach(function (k) {
-        var v = s.breakdown ? s.breakdown[k] : null;
-        if (typeof v !== "number") return;
-        card.appendChild(h("div", { class: "score-row" }, h("span", { text: LABELS[k] }),
-          h("span", { class: "track" }, h("i", { style: "width:" + Math.max(0, Math.min(100, v)) + "%" })),
-          h("span", { style: "text-align:right;font-variant-numeric:tabular-nums", text: v.toFixed(0) })));
-      });
+    ranked.forEach(function (s) {
+      var isElim = !!elim[s.participantId];
+      var isTop = !isElim && topLive && s.participantId === topLive.participantId;
+      var card = h("div", { class: "card score" + (isElim ? " eliminated" : ""), style: themeVars(themeFor(s.participantId)) },
+        h("div", { class: "score-total" },
+          isElim ? h("span", { class: "pill eliminated", text: "dropped" }) : h("b", { text: s.total.toFixed(1) }),
+          mark(s.participantId),
+          h("span", { style: "font-weight:650", text: s.participantId }),
+          isTop ? h("span", { class: "crown", text: "wrote the report" }) : null));
+      if (isElim) {
+        var el = elim[s.participantId];
+        var sdrop = dropReason(el.reason, el.error);
+        card.appendChild(h("div", { class: "score-row", style: "color:var(--muted)", text: "Out in round " + el.round + ": " + sdrop.label }));
+        if (sdrop.limit) {
+          if (sdrop.text) card.appendChild(h("div", { class: "score-row", style: "color:var(--disagree)", text: sdrop.text }));
+        } else {
+          var detail = eliminationDetail(el);
+          if (detail.message) card.appendChild(h("div", { class: "score-row", style: "color:var(--disagree)", text: detail.message }));
+          if (detail.hint) card.appendChild(h("div", { class: "score-row", style: "color:var(--ink2)", text: detail.hint }));
+        }
+      } else {
+        Object.keys(LABELS).forEach(function (k) {
+          var v = s.breakdown ? s.breakdown[k] : null;
+          if (typeof v !== "number") return;
+          card.appendChild(h("div", { class: "score-row" }, h("span", { text: LABELS[k] }),
+            h("span", { class: "track" }, h("i", { style: "width:" + Math.max(0, Math.min(100, v)) + "%" })),
+            h("span", { style: "text-align:right;font-variant-numeric:tabular-nums", text: v.toFixed(0) })));
+        });
+      }
       grid.appendChild(card);
     });
     return h("div", { class: "section" }, h("h3", { text: "Peer scores" }),
